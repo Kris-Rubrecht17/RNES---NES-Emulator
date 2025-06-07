@@ -464,6 +464,45 @@ impl TestCPU {
             0xDB => self.dcp(AddressMode::AbsoluteY, 7),
             0xC3 => self.dcp(AddressMode::IndirectX, 8),
             0xD3 => self.dcp(AddressMode::IndirectY, 8),
+            //isb
+            0xE7 => self.isb(AddressMode::ZeroPage, 5),
+            0xF7 => self.isb(AddressMode::ZeroPageX, 6),
+            0xEF => self.isb(AddressMode::Absolute, 6),
+            0xFF => self.isb(AddressMode::AbsoluteX, 7),
+            0xFB => self.isb(AddressMode::AbsoluteY, 7),
+            0xE3 => self.isb(AddressMode::IndirectX, 8),
+            0xF3 => self.isb(AddressMode::IndirectY, 8),
+            //slo
+            0x07 => self.slo(AddressMode::ZeroPage, 8),
+            0x17 => self.slo(AddressMode::ZeroPageX, 6),
+            0x0F => self.slo(AddressMode::Absolute, 6),
+            0x1F => self.slo(AddressMode::AbsoluteX, 7),
+            0x03 => self.slo(AddressMode::IndirectX, 8),
+            0x13 => self.slo(AddressMode::IndirectY, 8),
+            0x1B => self.slo(AddressMode::AbsoluteY, 7),
+            //rla
+            0x23 => self.rla(AddressMode::IndirectX, 8),
+            0x27 => self.rla(AddressMode::ZeroPage, 5),
+            0x2F => self.rla(AddressMode::Absolute, 6),
+            0x33 => self.rla(AddressMode::IndirectY, 8),
+            0x37 => self.rla(AddressMode::ZeroPageX, 6),
+            0x3B => self.rla(AddressMode::AbsoluteY, 7),
+            0x3F => self.rla(AddressMode::AbsoluteX, 7),
+            0x43 => self.srx(AddressMode::IndirectX, 8),
+            0x47 => self.srx(AddressMode::ZeroPage, 5),
+            0x4F => self.srx(AddressMode::Absolute, 6),
+            0x53 => self.srx(AddressMode::IndirectY, 8),
+            0x57 => self.srx(AddressMode::ZeroPageX, 6),
+            0x5F => self.srx(AddressMode::AbsoluteX, 7),
+            0x5B => self.srx(AddressMode::AbsoluteY, 7),
+            //rra
+            0x67 => self.rra(AddressMode::ZeroPage, 5),
+            0x77 => self.rra(AddressMode::ZeroPageX, 6),
+            0x6F => self.rra(AddressMode::Absolute, 6),
+            0x7F => self.rra(AddressMode::AbsoluteX, 7),
+            0x7B => self.rra(AddressMode::AbsoluteY, 7),
+            0x63 => self.rra(AddressMode::IndirectX, 8),
+            0x73 => self.rra(AddressMode::IndirectY, 8),
 
             _ => todo!("{opcode:2X}"),
         }
@@ -1005,9 +1044,8 @@ impl TestCPU {
         cycles + extra
     }
     fn dcp(&mut self, addr_mode: AddressMode, cycles: i32) -> i32 {
-
-        let need_dummy = addr_mode == AddressMode::AbsoluteX 
-            || addr_mode == AddressMode::AbsoluteY 
+        let need_dummy = addr_mode == AddressMode::AbsoluteX
+            || addr_mode == AddressMode::AbsoluteY
             || addr_mode == AddressMode::IndirectY;
 
         let (addr, extra) = addr_mode.decode(self);
@@ -1024,6 +1062,147 @@ impl TestCPU {
 
         self.set_flag(Self::C, self.a >= val);
         self.set_zn(result);
+
+        cycles + extra
+    }
+    fn isb(&mut self, addr_mode: AddressMode, cycles: i32) -> i32 {
+        let need_dummy = addr_mode == AddressMode::AbsoluteX
+            || addr_mode == AddressMode::AbsoluteY
+            || addr_mode == AddressMode::IndirectY;
+        let (addr, extra) = addr_mode.decode(self);
+        let mut val = self.bus.read(addr);
+
+        if need_dummy && extra == 0 {
+            //dummy read
+            let _ = self.bus.read(addr);
+        }
+
+        self.bus.write(addr, val);
+        val = val.wrapping_add(1);
+        self.bus.write(addr, val);
+        let nval = !(val) as u16;
+        let carry = if self.get_flag(Self::C) { 1 } else { 0 };
+
+        let result = self.a as u16 + nval + carry;
+
+        self.set_flag(Self::C, result > 0xFF);
+        self.set_zn((result & 0xFF) as u8);
+        self.set_flag(
+            Self::V,
+            ((self.a ^ result as u8) & (nval as u8 ^ result as u8) & 0x80) != 0,
+        );
+
+        self.a = result as u8;
+
+        cycles + extra
+    }
+    fn slo(&mut self, addr_mode: AddressMode, cycles: i32) -> i32 {
+        let need_dummy = addr_mode == AddressMode::AbsoluteX
+            || addr_mode == AddressMode::AbsoluteY
+            || addr_mode == AddressMode::IndirectY;
+        let (addr, extra) = addr_mode.decode(self);
+        let mut val = self.bus.read(addr);
+
+        if need_dummy && extra == 0 {
+            //dummy read
+            let _ = self.bus.read(addr);
+        }
+
+        self.bus.write(addr, val);
+        let carry_out = (val & 0x80) != 0;
+        val <<= 1;
+        self.bus.write(addr, val);
+        self.set_flag(Self::C, carry_out);
+
+        self.a |= val;
+        self.set_zn(self.a);
+
+        cycles + extra
+    }
+    fn rla(&mut self, addr_mode: AddressMode, cycles: i32) -> i32 {
+        let need_dummy = addr_mode == AddressMode::AbsoluteX
+            || addr_mode == AddressMode::AbsoluteY
+            || addr_mode == AddressMode::IndirectY;
+        let (addr, extra) = addr_mode.decode(self);
+        let mut val = self.bus.read(addr);
+
+        if need_dummy && extra == 0 {
+            //dummy read
+            let _ = self.bus.read(addr);
+        }
+
+        self.bus.write(addr, val);
+        let carry_out = (val & 0x80) != 0;
+        let carry_in = if self.get_flag(Self::C) { 1 } else { 0 };
+        val = (val << 1) | carry_in;
+        self.bus.write(addr, val);
+
+        self.a &= val;
+
+        self.set_flag(Self::C, carry_out);
+        self.set_zn(self.a);
+
+        cycles + extra
+    }
+    fn srx(&mut self, address_mode: AddressMode, cycles: i32) -> i32 {
+        let need_dummy = address_mode == AddressMode::AbsoluteX
+            || address_mode == AddressMode::AbsoluteY
+            || address_mode == AddressMode::IndirectY;
+        let (addr, extra) = address_mode.decode(self);
+        let mut val = self.bus.read(addr);
+
+        if need_dummy && extra == 0 {
+            //dummy read
+            let _ = self.bus.read(addr);
+        }
+
+        self.bus.write(addr, val);
+
+        let carry = (val & 1) != 0;
+
+        val >>= 1;
+
+        self.bus.write(addr, val);
+
+        self.a ^= val;
+        self.set_flag(Self::C, carry);
+        self.set_zn(self.a);
+
+        cycles + extra
+    }
+    fn rra(&mut self, address_mode: AddressMode, cycles: i32) -> i32 {
+        let need_dummy = address_mode == AddressMode::AbsoluteX
+            || address_mode == AddressMode::AbsoluteY
+            || address_mode == AddressMode::IndirectY;
+        let (addr, extra) = address_mode.decode(self);
+        let mut val = self.bus.read(addr);
+
+        if need_dummy && extra == 0 {
+            //dummy read
+            let _ = self.bus.read(addr);
+        }
+
+        self.bus.write(addr, val);
+
+        let carry_in = if self.get_flag(Self::C) { 0x80 } else { 0 };
+        let carry_out = (val & 0x01) != 0;
+        val = (val >> 1) | carry_in;
+
+        self.bus.write(addr, val);
+        self.set_flag(Self::C, carry_out);
+
+        let carry = if self.get_flag(Self::C) { 1 } else { 0 };
+        let sum = self.a as u16 + val as u16 + carry;
+
+        self.set_flag(Self::C, sum > 0xFF);
+
+        let result = sum as u8;
+
+        self.set_flag(Self::V, ((self.a ^ result) & (val ^ result) & 0x80) != 0);
+
+        self.a = result;
+
+        self.set_zn(self.a);
 
         cycles + extra
     }

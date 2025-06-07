@@ -153,10 +153,11 @@ fn run_test(test: Test) {
     assert_eq!(
         end_state,
         end_state.clone_from_cpu(&cpu),
-        "Failed Test: {} Expected:\n\t{:?}\nGot:\n\t{:?}",
+        "Failed Test: {} Expected:\n\t{:?}\nGot:\n\t{:?}\n{:?}",
         &test.name,
         end_state,
-        end_state.clone_from_cpu(&cpu)
+        end_state.clone_from_cpu(&cpu),
+        cpu.bus.cycles
     );
 
     assert_eq!(
@@ -1055,5 +1056,169 @@ mod undocumented {
     #[test]
     fn file_d3() -> TestRes {
         run_test_file(0xD3)
+    }
+    //isb
+
+    #[test]
+    fn file_e7() -> TestRes {
+        run_test_file(0xE7)
+    }
+    #[test]
+    fn file_f7() -> TestRes {
+        run_test_file(0xF7)
+    }
+    #[test]
+    fn file_ef() -> TestRes {
+        run_test_file(0xEF)
+    }
+    #[test]
+    fn file_ff() -> TestRes {
+        run_test_file(0xFF)
+    }
+    #[test]
+    fn file_fb() -> TestRes {
+        run_test_file(0xFB)
+    }
+    #[test]
+    fn file_e3() -> TestRes {
+        run_test_file(0xE3)
+    }
+    #[test]
+    fn file_f3() -> TestRes {
+        run_test_file(0xF3)
+    }
+    //slo
+    #[test]
+    fn file_07() -> TestRes {
+        run_test_file(0x07)
+    }
+
+    #[test]
+    fn file_17() -> TestRes {
+        run_test_file(0x17)
+    }
+
+    #[test]
+    fn file_0f() -> TestRes {
+        run_test_file(0x0F)
+    }
+
+    #[test]
+    fn file_1f() -> TestRes {
+        run_test_file(0x1F)
+    }
+
+    #[test]
+    fn file_03() -> TestRes {
+        run_test_file(0x03)
+    }
+
+    #[test]
+    fn file_13() -> TestRes {
+        run_test_file(0x13)
+    }
+
+    #[test]
+    fn file_1b() -> TestRes {
+        run_test_file(0x1B)
+    }
+    //rla
+    #[test]
+    fn file_23() -> TestRes {
+        run_test_file(0x23)
+    }
+
+    #[test]
+    fn file_27() -> TestRes {
+        run_test_file(0x27)
+    }
+
+    #[test]
+    fn file_2f() -> TestRes {
+        run_test_file(0x2F)
+    }
+
+    #[test]
+    fn file_33() -> TestRes {
+        run_test_file(0x33)
+    }
+
+    #[test]
+    fn file_37() -> TestRes {
+        run_test_file(0x37)
+    }
+
+    #[test]
+    fn file_3b() -> TestRes {
+        run_test_file(0x3B)
+    }
+
+    #[test]
+    fn file_3f() -> TestRes {
+        run_test_file(0x3F)
+    }
+    //srx
+    #[test]
+    fn file_43() -> TestRes {
+        run_test_file(0x43)
+    }
+    #[test]
+    fn file_47() -> TestRes {
+        run_test_file(0x47)
+    }
+    #[test]
+    fn file_4f() -> TestRes {
+        run_test_file(0x4f)
+    }
+    #[test]
+    fn file_53() -> TestRes {
+        run_test_file(0x53)
+    }
+    #[test]
+    fn file_57() -> TestRes {
+        run_test_file(0x57)
+    }
+    #[test]
+    fn file_5b() -> TestRes {
+        run_test_file(0x5b)
+    }
+    #[test]
+    fn file_5f() -> TestRes {
+        run_test_file(0x5f)
+    }
+    //rra
+    #[test]
+    fn file_67() -> TestRes {
+        run_test_file(0x67)
+    }
+
+    #[test]
+    fn file_77() -> TestRes {
+        run_test_file(0x77)
+    }
+
+    #[test]
+    fn file_6f() -> TestRes {
+        run_test_file(0x6F)
+    }
+
+    #[test]
+    fn file_7f() -> TestRes {
+        run_test_file(0x7F)
+    }
+
+    #[test]
+    fn file_7b() -> TestRes {
+        run_test_file(0x7B)
+    }
+
+    #[test]
+    fn file_63() -> TestRes {
+        run_test_file(0x63)
+    }
+
+    #[test]
+    fn file_73() -> TestRes {
+        run_test_file(0x73)
     }
 }

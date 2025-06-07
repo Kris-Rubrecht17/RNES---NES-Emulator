@@ -124,7 +124,7 @@ pub struct MMC1Cartridge {
 }
 impl MMC1Cartridge {
     pub fn with_cartridge(cart: Cartridge) -> Self {
-        MMC1Cartridge {
+        let mut cartridge = MMC1Cartridge {
             cart,
             shift_reg: 0x10,
             control: 0x0C,
@@ -133,7 +133,9 @@ impl MMC1Cartridge {
             shift_count: 0,
             prg_bank_offsets: (0, 0),
             chr_bank_offsets: (0, 0),
-        }
+        };
+        cartridge.reset();
+        cartridge
     }
     fn reset(&mut self) {
         self.shift_reg = 0x10;
@@ -198,7 +200,7 @@ impl Mapper {
     pub fn with_cart(cart: Cartridge) -> Self {
         match cart.mapper_id {
             0 => Self::Mapper0(cart),
-            1 => todo!("Mapper1"),
+            1 => Self::Mapper1(MMC1Cartridge::with_cartridge(cart)),
             2 => todo!("Mapper2"),
             4 => todo!("Mapper4"),
             _ => unreachable!(),

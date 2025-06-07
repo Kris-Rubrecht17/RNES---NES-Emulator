@@ -17,7 +17,7 @@ fn main() {
     };
     use sdl2::{event::Event, rect::Rect};
 
-    let cart = Cartridge::from_file("test_roms/nestest.nes").unwrap();
+    let cart = Cartridge::from_file("test_roms/color_test.nes").unwrap();
     let mapper = Mapper::with_cart(cart);
 
     let mut cpu = CPU::init(Bus::init(mapper));
