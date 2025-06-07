@@ -1,10 +1,13 @@
-#[derive(Copy, Clone, PartialEq)]
+use std::path::Path;
+
+#[derive(Copy, Clone, PartialEq,Debug)]
 pub enum MirrorMode {
     Vertical,
     Horizontal,
     SingleScreenA,
     SingleScreenB,
 }
+#[derive(Clone,Debug)]
 
 pub struct Cartridge {
     rom_data: Vec<u8>,
@@ -20,12 +23,42 @@ pub struct Cartridge {
     prg_ram: Vec<u8>,
     chr_ram: Vec<u8>,
 }
-impl Cartridge {
-    pub fn from_bytes(rom_data: Vec<u8>) -> Self {
-        if rom_data[0..4] != [b'N', b'E', b'S', b'\x1A'] {
-            panic!("Rom is not in iNES format");
-        }
+use std::error::Error;
 
+#[derive(Copy, Clone, Debug)]
+struct CartridgeLoadError {
+    pub reason: &'static str,
+}
+
+impl std::fmt::Display for CartridgeLoadError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.reason)
+    }
+}
+
+impl Error for CartridgeLoadError {}
+
+impl Cartridge {
+    pub fn from_file<PathLike: AsRef<Path>>(file_path: PathLike) -> Result<Self, Box<dyn Error>> {
+        use std::fs::File;
+        use std::io::Read;
+
+        let mut file = File::open(file_path)?;
+
+        let mut rom_data = Vec::new();
+
+        let _ = file.read_to_end(&mut rom_data)?;
+        if rom_data[0..4] != [b'N', b'E', b'S', b'\x1A'] {
+            return Err(Box::new(CartridgeLoadError {
+                reason: "Not a valid nes rom",
+            }));
+        }
+        let cart = Cartridge::from_bytes(rom_data);
+
+        return Ok(cart);
+    }
+
+    pub fn from_bytes(rom_data: Vec<u8>) -> Self {
         let prg_banks = rom_data[4] as i32;
         let chr_banks = rom_data[5] as i32;
 
@@ -72,6 +105,8 @@ impl Cartridge {
     }
 }
 
+
+#[derive(Clone,Debug)]
 pub enum Mapper {
     Mapper0(Cartridge),
 }

@@ -82,7 +82,7 @@ impl PartialEq for CpuState {
 }
 
 impl CpuState {
-    pub fn as_cpu(&self) -> CPU {
+    pub fn clone_to_cpu(&self) -> CPU {
         let mut cpu = CPU {
             a: self.a,
             x: self.x,
@@ -99,7 +99,7 @@ impl CpuState {
         }
         cpu
     }
-    pub fn from_cpu(&self, cpu: &CPU) -> Self {
+    pub fn clone_from_cpu(&self, cpu: &CPU) -> Self {
         let mut state = CpuState {
             a: cpu.a,
             x: cpu.x,
@@ -146,17 +146,17 @@ fn run_test(test: Test) {
     let start_state = test.initial.clone();
     let end_state = test._final.clone();
 
-    let mut cpu = start_state.as_cpu();
+    let mut cpu = start_state.clone_to_cpu();
 
     cpu.execute_instruction();
 
     assert_eq!(
         end_state,
-        end_state.from_cpu(&cpu),
+        end_state.clone_from_cpu(&cpu),
         "Failed Test: {} Expected:\n\t{:?}\nGot:\n\t{:?}",
         &test.name,
         end_state,
-        start_state.from_cpu(&cpu)
+        end_state.clone_from_cpu(&cpu)
     );
 
     assert_eq!(
@@ -896,4 +896,24 @@ mod file_tests {
             run_test_file(0x83)
         }
     }
+}
+
+
+mod cartridge_tests {
+    use super::TestRes;
+    use crate::cartridge::{Cartridge,Mapper};
+
+    #[test]
+    fn load_test_rom()-> TestRes {
+        let cart = Cartridge::from_file("test_roms/nestest.nes")?;
+
+        let mapper = Mapper::with_cart(cart);
+
+        println!("{}",mapper.cpu_read(0xFFFC));
+        
+        Ok(())
+    }
+
+
+
 }
