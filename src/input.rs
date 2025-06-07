@@ -1,5 +1,5 @@
 pub struct Input {
-    controller_state: u8,
+    pub controller_state: u8,
     controller_shift: u8,
 }
 

@@ -6,9 +6,9 @@ pub struct Bus {
     cartridge: Mapper,
     //using RefCell because reading input requires &mut Input,
     //which would require Bus::read to take &mut self otherwise.
-    input: Rc<RefCell<Input>>,
+    pub input: Rc<RefCell<Input>>,
     ram: Vec<u8>,
-    ppu: PPU,
+    pub ppu: PPU,
     pub irq: bool,
     pub nmi_request: bool,
 }
@@ -55,7 +55,9 @@ impl Bus {
             //
             0x0000..=0x1FFF => self.ram[addr as usize & 0x7FF] = val,
             //
-            0x2000..=0x3FFF => todo!("PPU"),
+            0x2000..=0x3FFF =>{ 
+                let mapper = &mut self.cartridge;
+                self.ppu.write_register(mapper, addr, val)},
             //
             0x6000..=0xFFFF => self.cartridge.cpu_write(addr, val),
             _ => {}
@@ -69,5 +71,15 @@ impl Bus {
             self.ppu.oam_ram[oam_addr as usize] = val;
             self.ppu.registers.borrow_mut().oam_addr = oam_addr.wrapping_add(1);
         }
+    }
+    pub fn tick_ppu(&mut self,elapsed_cycles : i32) {
+        let (ppu,mapper,irq,nmi) = (
+            &mut self.ppu,
+            &mut self.cartridge,
+            &mut self.irq,
+            &mut self.nmi_request
+        );
+
+        ppu.step(mapper,nmi,irq,elapsed_cycles);
     }
 }

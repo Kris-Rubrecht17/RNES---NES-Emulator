@@ -1,5 +1,7 @@
 use std::{cell::RefCell, rc::Rc};
 
+use sdl2::pixels::Color;
+
 use crate::cartridge::{Mapper, MirrorMode};
 
 pub struct PPURegisters {
@@ -48,7 +50,11 @@ pub struct PPU {
     vram: Vec<u8>,
     palette_ram: [u8; 32],
     pub oam_ram: [u8; 256],
-    frame_buffer: Vec<u8>,
+    pub frame_buffer: Vec<Color>,
+    background_priority: Vec<bool>,
+    active_render_addr: u16,
+    scanline: u32,
+    scanline_cycle: u32,
 }
 
 impl PPU {
@@ -60,8 +66,76 @@ impl PPU {
             vram: vec![0; 2048],
             palette_ram: [0; 32],
             oam_ram: [0; 256],
-            frame_buffer: vec![0; Self::SCREEN_WIDTH * Self::SCREEN_HEIGHT],
+            frame_buffer: vec![Color::RGBA(0, 0, 0, 0); Self::SCREEN_WIDTH * Self::SCREEN_HEIGHT],
+            background_priority: vec![false; Self::SCREEN_WIDTH * Self::SCREEN_HEIGHT],
+            active_render_addr: 0,
+            scanline: 0,
+            scanline_cycle: 0,
         }
+    }
+
+    pub fn step(&mut self, mapper : &mut Mapper, nmi : &mut bool, irq : &mut bool, elapsed_cycles : i32) {
+        
+        for _ in 0..elapsed_cycles {   
+            if self.scanline == 0 && self.scanline_cycle == 0 {
+                self.registers.borrow_mut().status &= 0x3F;        
+            }
+
+            if self.scanline < 240 && self.scanline_cycle == 260 {
+                //[TODO:] Mapper4 and cartridge irq
+
+            }
+
+            self.scanline_cycle += 1;
+
+            if self.scanline_cycle >= 341 {
+
+                self.scanline_cycle = 0;
+
+                if self.scanline < 240 {
+                    //[TODO] copy addr, render scanline, increment y
+                    self.copy_tmp_to_vram_addr();
+                    self.render_scanline(mapper);
+                    self.increment_y();
+                }
+
+                if self.scanline == 241 {
+                    let mut registers = self.registers.borrow_mut();
+                    registers.status |= 0x80;
+                    if (registers.control & 0x80) != 0 {
+                        *nmi = true;
+                    }            
+                }
+
+                if self.scanline == 261 {
+                    let mut reg = self.registers.borrow_mut();
+                    reg.vram_addr = reg.tmp_vram_addr;
+                }
+
+                self.scanline += 1;
+
+                if self.scanline > 261 {
+                    self.scanline = 0;
+                }
+
+            }
+
+
+        }
+
+    }
+
+    fn render_scanline(&mut self, mapper : &mut Mapper) {
+        let base_offset = self.scanline as usize * Self::SCREEN_WIDTH;
+        for color in self.frame_buffer[base_offset..base_offset+Self::SCREEN_WIDTH].iter_mut() {
+            *color = Color::RGBA(0,0,0,255);
+        }
+        for prior in self.background_priority[base_offset..base_offset + Self::SCREEN_WIDTH].iter_mut() {
+            *prior = false;
+        }
+
+        self.render_background(mapper);
+
     }
     pub fn read(&self, mapper: &Mapper, addr: u16) -> u8 {
         let addr = addr & 0x3FFF;
@@ -199,7 +273,91 @@ impl PPU {
             _ => {}
         }
     }
+    fn render_background(&mut self, mapper: &Mapper) {
+        if (self.registers.borrow().mask & 0x08) == 0 {
+            return;
+        }
 
+        self.active_render_addr = self.registers.borrow().vram_addr;
+
+        for tile in 0..33 {
+            let coarse_x = self.active_render_addr & 0x001F;
+            let coarse_y = (self.active_render_addr >> 5) & 0x001F;
+            let name_table = (self.active_render_addr >> 10) & 0x0003;
+
+            let base_name_table_addr = 0x2000 + (name_table << 10);
+            let tile_addr = base_name_table_addr + (coarse_y << 5) + coarse_x;
+            let tile_idx = self.read(mapper, tile_addr) as u16;
+
+            let fine_y = (self.active_render_addr >> 12) & 0x07;
+
+            let pattern_table = if (self.registers.borrow().control & 0x10) != 0 {
+                0x1000
+            } else {
+                0x0000
+            };
+            let pattern_addr = pattern_table + (tile_idx << 4) + fine_y;
+
+            let plane0 = self.read(mapper, pattern_addr);
+            let plane1 = self.read(mapper, pattern_addr.wrapping_add(8));
+
+            let attribute_x = coarse_x >> 2;
+            let attribute_y = coarse_y >> 2;
+            let attribute_addr = base_name_table_addr
+                .wrapping_add(0x3C0)
+                .wrapping_add(attribute_y << 3)
+                .wrapping_add(attribute_x);
+            let attribute_byte = self.read(mapper, attribute_addr);
+
+            let attribute_shift = (((coarse_y & 0x03) >> 1) << 2) + (coarse_x & 0x02);
+            let palette_idx = (attribute_byte >> attribute_shift) & 0x03;
+
+            for i in 0..8 {
+                let x_coor = (tile << 3) + i - self.registers.borrow().fine_x as i32;
+                if x_coor < 0 || x_coor >= Self::SCREEN_WIDTH as i32 {
+                    continue;
+                }
+
+                let bit_idx = 7 - i as u8;
+                let bit0 = (plane0 >> bit_idx) & 1;
+                let bit1 = (plane1 >> bit_idx) & 1;
+                let color_idx = bit0 | (bit1 << 1);
+
+                let screen_coor =
+                    (self.scanline as i32 * (Self::SCREEN_WIDTH as i32) + x_coor) as usize;
+                if color_idx != 0 {
+                    self.background_priority[screen_coor] = true;
+                }
+
+
+                self.frame_buffer[screen_coor] = self.fetch_background_color(color_idx, palette_idx);
+            }
+            self.increment_x();
+        }
+    }
+    
+    fn increment_x(&mut self) {
+        if (self.active_render_addr & 0x001F) == 31 {
+            self.active_render_addr &= 0xFFE0;
+            self.active_render_addr ^= 0x0400;
+        }
+        else {
+            self.active_render_addr += 1;
+        }
+
+    }
+    
+    fn fetch_background_color(&self,color_idx : u8, palette_idx : u8) -> Color {
+        if color_idx == 0 {
+            let bg_color_idx = self.palette_ram[0] as usize;
+            return NES_COLOR_PALETTE[bg_color_idx & 63]
+        }
+        let palette_base = (palette_idx << 2).wrapping_add(0x11);
+        let palette_ram_idx = palette_base.wrapping_add(color_idx.wrapping_sub(1)) as usize;
+        let palette_color_idx = self.palette_ram[palette_ram_idx] as usize;
+
+        NES_COLOR_PALETTE[palette_color_idx & 63]
+    }
     fn mirror_vram_addr(mapper: &Mapper, addr: u16) -> u16 {
         let offset = addr & 0xFFF;
 
@@ -214,4 +372,97 @@ impl PPU {
             SingleScreenB => (0x400 + inner_offset) as u16,
         }
     }
+    fn copy_tmp_to_vram_addr(&mut self) {
+        let mut registers = self.registers.borrow_mut();
+        registers.vram_addr = (registers.vram_addr & 0xFBE0) | (registers.tmp_vram_addr & 0x041F);
+    }
+    fn increment_y(&mut self) {
+        let mut reg = self.registers.borrow_mut();
+
+        if (reg.vram_addr & 0x7000) != 0x7000 {
+            reg.vram_addr = reg.vram_addr.wrapping_add(0x1000);
+        } else {
+            reg.vram_addr &= 0x8FFF;
+            let y = (reg.vram_addr & 0x03E0) >> 5;
+
+            let y = match y {
+                29=>{
+                    reg.vram_addr ^= 0x0800;
+                    0
+                }
+                31=>0,
+                _=>y.wrapping_add(1)
+            };
+
+            reg.vram_addr = (reg.vram_addr & 0xFC1F) | (y << 5);
+            
+        }
+    }
 }
+
+const NES_COLOR_PALETTE: [Color; 64] = [
+    Color::RGBA(84, 84, 84, 255),
+    Color::RGBA(0, 30, 116, 255),
+    Color::RGBA(8, 16, 144, 255),
+    Color::RGBA(48, 0, 136, 255),
+    Color::RGBA(68, 0, 100, 255),
+    Color::RGBA(92, 0, 48, 255),
+    Color::RGBA(84, 4, 0, 255),
+    Color::RGBA(60, 24, 0, 255),
+    Color::RGBA(32, 42, 0, 255),
+    Color::RGBA(8, 58, 0, 255),
+    Color::RGBA(0, 64, 0, 255),
+    Color::RGBA(0, 60, 0, 255),
+    Color::RGBA(0, 50, 60, 255),
+    Color::RGBA(0, 0, 0, 255),
+    Color::RGBA(0, 0, 0, 255),
+    Color::RGBA(0, 0, 0, 255),
+    Color::RGBA(152, 150, 152, 255),
+    Color::RGBA(8, 76, 196, 255),
+    Color::RGBA(48, 50, 236, 255),
+    Color::RGBA(92, 30, 228, 255),
+    Color::RGBA(136, 20, 176, 255),
+    Color::RGBA(160, 20, 100, 255),
+    Color::RGBA(152, 34, 32, 255),
+    Color::RGBA(120, 60, 0, 255),
+    Color::RGBA(84, 90, 0, 255),
+    Color::RGBA(40, 114, 0, 255),
+    Color::RGBA(8, 124, 0, 255),
+    Color::RGBA(0, 118, 40, 255),
+    Color::RGBA(0, 102, 120, 255),
+    Color::RGBA(0, 0, 0, 255),
+    Color::RGBA(0, 0, 0, 255),
+    Color::RGBA(0, 0, 0, 255),
+    Color::RGBA(236, 238, 236, 255),
+    Color::RGBA(76, 154, 236, 255),
+    Color::RGBA(120, 124, 236, 255),
+    Color::RGBA(176, 98, 236, 255),
+    Color::RGBA(228, 84, 236, 255),
+    Color::RGBA(236, 88, 180, 255),
+    Color::RGBA(236, 106, 100, 255),
+    Color::RGBA(212, 136, 32, 255),
+    Color::RGBA(160, 170, 0, 255),
+    Color::RGBA(116, 196, 0, 255),
+    Color::RGBA(76, 208, 32, 255),
+    Color::RGBA(56, 204, 108, 255),
+    Color::RGBA(56, 180, 204, 255),
+    Color::RGBA(60, 60, 60, 255),
+    Color::RGBA(0, 0, 0, 255),
+    Color::RGBA(0, 0, 0, 255),
+    Color::RGBA(236, 238, 236, 255),
+    Color::RGBA(168, 204, 236, 255),
+    Color::RGBA(188, 188, 236, 255),
+    Color::RGBA(212, 178, 236, 255),
+    Color::RGBA(236, 174, 236, 255),
+    Color::RGBA(236, 174, 212, 255),
+    Color::RGBA(236, 180, 176, 255),
+    Color::RGBA(228, 196, 144, 255),
+    Color::RGBA(204, 210, 120, 255),
+    Color::RGBA(180, 222, 120, 255),
+    Color::RGBA(168, 226, 144, 255),
+    Color::RGBA(152, 226, 180, 255),
+    Color::RGBA(160, 214, 228, 255),
+    Color::RGBA(160, 162, 160, 255),
+    Color::RGBA(0, 0, 0, 255),
+    Color::RGBA(0, 0, 0, 255),
+];

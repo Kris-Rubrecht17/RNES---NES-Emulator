@@ -256,7 +256,6 @@ impl CPU {
         }
 
         let opcode = self.fetch();
-        println!("OPCODE: {opcode}");
         use AddressMode::*;
         use Register::*;
         match opcode {
@@ -318,7 +317,7 @@ impl CPU {
             0xC0 => self.cmp(Y, Immediate, 2),
             0xC4 => self.cmp(Y, ZeroPage, 3),
             0xCC => self.cmp(Y, Absolute, 4),
-            //dec
+            //deccartridge
             0xC6 => self.dec(ZeroPage, 5),
             0xD6 => self.dec(ZeroPageX, 6),
             0xCE => self.dec(Absolute, 6),
@@ -492,7 +491,7 @@ impl CPU {
                 /*
                     Needed for weird dummy-read quirk.
                     It seems that for read-modify-write instructions,
-                    Abolute, X addressing expects a dummy read, even
+                    'Abolute, X' addressing expects a dummy read, even
                     when page boundaries have not been crossed. i.e. extra == 0
                 */
                 let absx = address_mode == AddressMode::AbsoluteX;
@@ -530,7 +529,7 @@ impl CPU {
             self.pc = addr;
             3 + extra
         } else {
-            println!("Branch not taken");
+            
             2
         }
     }
@@ -764,9 +763,8 @@ impl CPU {
         let _ = self.bus.read(self.pc);
         let _ = self.bus.read(self.sp + 0x100);
         let val = self.pop();
-        println!("popped val {val}");
         let status_to_write = val & !(Self::B);
-        println!("status_to_write {}", status_to_write);
+        
         self.status = status_to_write | Self::U;
         4
     }
@@ -978,7 +976,9 @@ impl CPU {
     }
     fn irq(&mut self) -> i32 {
         if !self.get_flag(Self::I) {
-            self.bus.read(self.sp + 0x100);
+            //dummy-read
+            let _ = self.bus.read(self.sp + 0x100);
+            
             self.push_word(self.pc);
             self.set_flag(Self::B, false);
             self.set_flag(Self::U, true);
@@ -995,7 +995,8 @@ impl CPU {
     }
     fn nmi(&mut self) -> i32 {
         //dummy-read
-        self.bus.read(self.sp + 0x100);
+        let _ = self.bus.read(self.sp + 0x100);
+        
         self.push_word(self.pc);
         self.set_flag(Self::B, false);
         self.set_flag(Self::U, true);

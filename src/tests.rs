@@ -898,22 +898,22 @@ mod file_tests {
     }
 }
 
-
 mod cartridge_tests {
     use super::TestRes;
-    use crate::cartridge::{Cartridge,Mapper};
+    use crate::cartridge::{Cartridge, Mapper};
 
     #[test]
-    fn load_test_rom()-> TestRes {
+    fn load_test_rom() -> TestRes {
         let cart = Cartridge::from_file("test_roms/nestest.nes")?;
 
         let mapper = Mapper::with_cart(cart);
 
-        println!("{}",mapper.cpu_read(0xFFFC));
-        
+        println!("{}", mapper.cpu_read(0xFFFC));
+
         Ok(())
     }
-
-
-
+}
+#[test]
+fn color_size() {
+    println!("{}", std::mem::size_of::<sdl2::pixels::Color>());
 }
