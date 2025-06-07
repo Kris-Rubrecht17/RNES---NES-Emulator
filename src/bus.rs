@@ -55,9 +55,10 @@ impl Bus {
             //
             0x0000..=0x1FFF => self.ram[addr as usize & 0x7FF] = val,
             //
-            0x2000..=0x3FFF =>{ 
+            0x2000..=0x3FFF => {
                 let mapper = &mut self.cartridge;
-                self.ppu.write_register(mapper, addr, val)},
+                self.ppu.write_register(mapper, addr, val)
+            }
             //
             0x6000..=0xFFFF => self.cartridge.cpu_write(addr, val),
             _ => {}
@@ -72,14 +73,14 @@ impl Bus {
             self.ppu.registers.borrow_mut().oam_addr = oam_addr.wrapping_add(1);
         }
     }
-    pub fn tick_ppu(&mut self,elapsed_cycles : i32) {
-        let (ppu,mapper,irq,nmi) = (
+    pub fn tick_ppu(&mut self, elapsed_cycles: i32) {
+        let (ppu, mapper, irq, nmi) = (
             &mut self.ppu,
             &mut self.cartridge,
             &mut self.irq,
-            &mut self.nmi_request
+            &mut self.nmi_request,
         );
 
-        ppu.step(mapper,nmi,irq,elapsed_cycles);
+        ppu.step(mapper, nmi, irq, elapsed_cycles);
     }
 }

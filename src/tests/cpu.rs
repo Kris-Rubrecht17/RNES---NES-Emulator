@@ -1,5 +1,9 @@
-#[cfg(not(feature = "cpu-only-tests"))]
-use crate::bus::Bus;
+/*
+    A Test version of the CPU, for Single Instruction Tests
+    The only difference is that it uses a TestBus instead of a
+    Bus, and it does not check for interrupts.
+*/
+use super::cpu_only_tests::TestBus;
 
 #[derive(PartialEq)]
 pub enum AddressMode {
@@ -17,7 +21,7 @@ pub enum AddressMode {
     Relative,
 }
 impl AddressMode {
-    pub fn decode(self, cpu: &mut CPU) -> (u16, i32) {
+    pub fn decode(self, cpu: &mut TestCPU) -> (u16, i32) {
         use AddressMode::*;
         match self {
             Accumulator => {
@@ -133,7 +137,7 @@ pub enum Register {
     Y,
 }
 impl Register {
-    pub fn get(&self, cpu: &CPU) -> u8 {
+    pub fn get(&self, cpu: &TestCPU) -> u8 {
         use Register::*;
         match self {
             A => cpu.a,
@@ -142,7 +146,7 @@ impl Register {
         }
     }
 
-    pub fn get_mut<'a>(&self, cpu: &'a mut CPU) -> &'a mut u8 {
+    pub fn get_mut<'a>(&self, cpu: &'a mut TestCPU) -> &'a mut u8 {
         use Register::*;
         match self {
             A => &mut cpu.a,
@@ -152,18 +156,17 @@ impl Register {
     }
 }
 
-pub struct CPU {
+pub struct TestCPU {
     pub a: u8,
     pub x: u8,
     pub y: u8,
     pub sp: u16,
     pub pc: u16,
     pub status: u8,
-    pub bus: Bus,
+    pub bus: TestBus,
     pub ir_disable: bool,
 }
-
-impl CPU {
+impl TestCPU {
     pub const C: u8 = 1;
     pub const Z: u8 = 1 << 1;
     pub const I: u8 = 1 << 2;
@@ -172,8 +175,8 @@ impl CPU {
     pub const U: u8 = 1 << 5;
     pub const V: u8 = 1 << 6;
     pub const N: u8 = 1 << 7;
-    pub fn init(bus: Bus) -> Self {
-        let mut cpu = CPU {
+    pub fn init(bus: TestBus) -> Self {
+        let mut cpu = TestCPU {
             a: 0,
             x: 0,
             y: 0,
@@ -187,7 +190,6 @@ impl CPU {
 
         cpu
     }
-
     pub fn reset(&mut self) {
         self.a = 0;
         self.x = 0;
@@ -239,16 +241,6 @@ impl CPU {
     }
 
     pub fn execute_instruction(&mut self) -> i32 {
-        if self.bus.nmi_request {
-            self.bus.nmi_request = false;
-            return self.nmi();
-        }
-
-        if self.bus.irq {
-            self.bus.irq = false;
-            return self.irq();
-        }
-
         let opcode = self.fetch();
         use AddressMode::*;
         use Register::*;
@@ -439,6 +431,7 @@ impl CPU {
             0x97 => self.sax(ZeroPageY, 4),
             0x8F => self.sax(Absolute, 4),
             0x83 => self.sax(IndirectX, 6),
+            //unofficial nops
             0x04 => self.multibyte_nop(AddressMode::ZeroPage, 3),
             0x44 => self.multibyte_nop(AddressMode::ZeroPage, 3),
             0x64 => self.multibyte_nop(AddressMode::ZeroPage, 3),
@@ -462,11 +455,8 @@ impl CPU {
             0x3A => self.nop(),
             0x5A => self.nop(),
             0x7A => self.nop(),
-            0xDA => self.multibyte_nop(AddressMode::AbsoluteX, 4),
+            0xDA => self.nop(),
             0x89 => self.multibyte_nop(AddressMode::Immediate, 2),
-            //unofficial sbc
-            0xEB => self.sbc(Immediate, 2),
-            //dcp
             0xC7 => self.dcp(AddressMode::ZeroPage, 5),
             0xD7 => self.dcp(AddressMode::ZeroPageX, 6),
             0xCF => self.dcp(AddressMode::Absolute, 6),
@@ -474,7 +464,8 @@ impl CPU {
             0xDB => self.dcp(AddressMode::AbsoluteY, 7),
             0xC3 => self.dcp(AddressMode::IndirectX, 8),
             0xD3 => self.dcp(AddressMode::IndirectY, 8),
-            _ => todo!("{opcode:2X}, {:04X}", self.pc),
+
+            _ => todo!("{opcode:2X}"),
         }
     }
 
@@ -1006,10 +997,10 @@ impl CPU {
 
         cycles
     }
-
     fn multibyte_nop(&mut self, addr_mode: AddressMode, cycles: i32) -> i32 {
         //dummy-read
-        let (_, extra) = addr_mode.decode(self);
+        let (addr, extra) = addr_mode.decode(self);
+        self.bus.read(addr);
 
         cycles + extra
     }
@@ -1018,15 +1009,13 @@ impl CPU {
         let need_dummy = addr_mode == AddressMode::AbsoluteX 
             || addr_mode == AddressMode::AbsoluteY 
             || addr_mode == AddressMode::IndirectY;
+
         let (addr, extra) = addr_mode.decode(self);
         let mut val = self.bus.read(addr);
-
         if need_dummy && extra == 0 {
             //dummy read
             let _ = self.bus.read(addr);
         }
-
-
         self.bus.write(addr, val);
         val = val.wrapping_sub(1);
         self.bus.write(addr, val);
@@ -1038,7 +1027,6 @@ impl CPU {
 
         cycles + extra
     }
-
     fn irq(&mut self) -> i32 {
         if !self.get_flag(Self::I) {
             //dummy-read

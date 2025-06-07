@@ -74,22 +74,25 @@ impl PPU {
         }
     }
 
-    pub fn step(&mut self, mapper : &mut Mapper, nmi : &mut bool, irq : &mut bool, elapsed_cycles : i32) {
-        
-        for _ in 0..elapsed_cycles {   
+    pub fn step(
+        &mut self,
+        mapper: &mut Mapper,
+        nmi: &mut bool,
+        _irq: &mut bool,
+        elapsed_cycles: i32,
+    ) {
+        for _ in 0..elapsed_cycles {
             if self.scanline == 0 && self.scanline_cycle == 0 {
-                self.registers.borrow_mut().status &= 0x3F;        
+                self.registers.borrow_mut().status &= 0x3F;
             }
 
             if self.scanline < 240 && self.scanline_cycle == 260 {
                 //[TODO:] Mapper4 and cartridge irq
-
             }
 
             self.scanline_cycle += 1;
 
             if self.scanline_cycle >= 341 {
-
                 self.scanline_cycle = 0;
 
                 if self.scanline < 240 {
@@ -104,7 +107,7 @@ impl PPU {
                     registers.status |= 0x80;
                     if (registers.control & 0x80) != 0 {
                         *nmi = true;
-                    }            
+                    }
                 }
 
                 if self.scanline == 261 {
@@ -117,25 +120,22 @@ impl PPU {
                 if self.scanline > 261 {
                     self.scanline = 0;
                 }
-
             }
-
-
         }
-
     }
 
-    fn render_scanline(&mut self, mapper : &mut Mapper) {
+    fn render_scanline(&mut self, mapper: &mut Mapper) {
         let base_offset = self.scanline as usize * Self::SCREEN_WIDTH;
-        for color in self.frame_buffer[base_offset..base_offset+Self::SCREEN_WIDTH].iter_mut() {
-            *color = Color::RGBA(0,0,0,255);
+        for color in self.frame_buffer[base_offset..base_offset + Self::SCREEN_WIDTH].iter_mut() {
+            *color = Color::RGBA(0, 0, 0, 255);
         }
-        for prior in self.background_priority[base_offset..base_offset + Self::SCREEN_WIDTH].iter_mut() {
+        for prior in
+            self.background_priority[base_offset..base_offset + Self::SCREEN_WIDTH].iter_mut()
+        {
             *prior = false;
         }
 
         self.render_background(mapper);
-
     }
     pub fn read(&self, mapper: &Mapper, addr: u16) -> u8 {
         let addr = addr & 0x3FFF;
@@ -329,28 +329,26 @@ impl PPU {
                     self.background_priority[screen_coor] = true;
                 }
 
-
-                self.frame_buffer[screen_coor] = self.fetch_background_color(color_idx, palette_idx);
+                self.frame_buffer[screen_coor] =
+                    self.fetch_background_color(color_idx, palette_idx);
             }
             self.increment_x();
         }
     }
-    
+
     fn increment_x(&mut self) {
         if (self.active_render_addr & 0x001F) == 31 {
             self.active_render_addr &= 0xFFE0;
             self.active_render_addr ^= 0x0400;
-        }
-        else {
+        } else {
             self.active_render_addr += 1;
         }
-
     }
-    
-    fn fetch_background_color(&self,color_idx : u8, palette_idx : u8) -> Color {
+
+    fn fetch_background_color(&self, color_idx: u8, palette_idx: u8) -> Color {
         if color_idx == 0 {
             let bg_color_idx = self.palette_ram[0] as usize;
-            return NES_COLOR_PALETTE[bg_color_idx & 63]
+            return NES_COLOR_PALETTE[bg_color_idx & 63];
         }
         let palette_base = (palette_idx << 2).wrapping_add(0x11);
         let palette_ram_idx = palette_base.wrapping_add(color_idx.wrapping_sub(1)) as usize;
@@ -386,16 +384,15 @@ impl PPU {
             let y = (reg.vram_addr & 0x03E0) >> 5;
 
             let y = match y {
-                29=>{
+                29 => {
                     reg.vram_addr ^= 0x0800;
                     0
                 }
-                31=>0,
-                _=>y.wrapping_add(1)
+                31 => 0,
+                _ => y.wrapping_add(1),
             };
 
             reg.vram_addr = (reg.vram_addr & 0xFC1F) | (y << 5);
-            
         }
     }
 }

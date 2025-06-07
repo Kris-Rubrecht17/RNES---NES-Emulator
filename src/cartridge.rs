@@ -104,41 +104,41 @@ impl Cartridge {
             chr_ram,
         }
     }
-    pub fn set_mirroring(&mut self, mode : MirrorMode) {
+    pub fn set_mirroring(&mut self, mode: MirrorMode) {
         self.mirror_mode = mode;
         self.mirror_vert = mode == MirrorMode::Vertical;
         self.mirror_horz = mode == MirrorMode::Horizontal;
     }
 }
 
-#[derive(Clone,Debug)]
+#[derive(Clone, Debug)]
 pub struct MMC1Cartridge {
-    cart : Cartridge,
-    shift_reg : u8,
-    control : u8,
-    chr_banks : (u8,u8),
-    prg_bank : u8,
-    shift_count : u8,
-    prg_bank_offsets:(u16,u16),
-    chr_bank_offsets:(u16,u16)
+    cart: Cartridge,
+    shift_reg: u8,
+    control: u8,
+    chr_banks: (u8, u8),
+    prg_bank: u8,
+    shift_count: u8,
+    prg_bank_offsets: (u16, u16),
+    chr_bank_offsets: (u16, u16),
 }
 impl MMC1Cartridge {
-    pub fn with_cartridge(cart : Cartridge)->Self {
+    pub fn with_cartridge(cart: Cartridge) -> Self {
         MMC1Cartridge {
             cart,
-            shift_reg:0x10,
-            control:0x0C,
-            chr_banks:(0,0),
-            prg_bank:0,
-            shift_count:0,
-            prg_bank_offsets:(0,0),
-            chr_bank_offsets:(0,0)
+            shift_reg: 0x10,
+            control: 0x0C,
+            chr_banks: (0, 0),
+            prg_bank: 0,
+            shift_count: 0,
+            prg_bank_offsets: (0, 0),
+            chr_bank_offsets: (0, 0),
         }
     }
     fn reset(&mut self) {
         self.shift_reg = 0x10;
         self.control = 0x0C;
-        self.chr_banks = (0,0);
+        self.chr_banks = (0, 0);
         self.prg_bank = 0;
         self.shift_count = 0;
         self.apply_mirroring();
@@ -146,11 +146,11 @@ impl MMC1Cartridge {
     }
     pub fn apply_mirroring(&mut self) {
         match self.control & 0x03 {
-            0=>self.cart.set_mirroring(MirrorMode::SingleScreenA),
-            1=>self.cart.set_mirroring(MirrorMode::SingleScreenB),
-            2=>self.cart.set_mirroring(MirrorMode::Vertical),
-            3=>self.cart.set_mirroring(MirrorMode::Horizontal),
-            _=>unreachable!()
+            0 => self.cart.set_mirroring(MirrorMode::SingleScreenA),
+            1 => self.cart.set_mirroring(MirrorMode::SingleScreenB),
+            2 => self.cart.set_mirroring(MirrorMode::Vertical),
+            3 => self.cart.set_mirroring(MirrorMode::Horizontal),
+            _ => unreachable!(),
         }
     }
     pub fn apply_banks(&mut self) {
@@ -159,8 +159,7 @@ impl MMC1Cartridge {
         if chr_mode == 0 {
             self.chr_bank_offsets.0 = ((self.chr_banks.0 & 0x1E) as u16) << 12;
             self.chr_bank_offsets.1 = self.chr_bank_offsets.0.wrapping_add(0x1000);
-        }
-        else {
+        } else {
             self.chr_bank_offsets.0 = (self.chr_banks.0 as u16) << 12;
             self.chr_bank_offsets.1 = (self.chr_banks.1 as u16) << 12;
         }
@@ -178,18 +177,16 @@ impl MMC1Cartridge {
                 self.prg_bank_offsets.0 = 0;
                 self.prg_bank_offsets.1 = ((self.prg_bank as u16) % prg_bank_count.max(1)) << 12;
             }
-            3=>{
+            3 => {
                 self.prg_bank_offsets.0 = ((self.prg_bank as u16) % prg_bank_count.max(1)) << 12;
                 self.prg_bank_offsets.1 = (prg_bank_count - 1) << 12;
             }
-            _=>{}
+            _ => {}
         }
         self.prg_bank_offsets.0 %= self.cart.prg_rom.len() as u16;
         self.prg_bank_offsets.1 %= self.cart.prg_rom.len() as u16;
-
-        }
-    } 
-
+    }
+}
 
 #[derive(Clone, Debug)]
 pub enum Mapper {
@@ -198,7 +195,6 @@ pub enum Mapper {
 }
 
 impl Mapper {
-    
     pub fn with_cart(cart: Cartridge) -> Self {
         match cart.mapper_id {
             0 => Self::Mapper0(cart),
@@ -225,23 +221,18 @@ impl Mapper {
                 }
                 _ => 0,
             },
-            Mapper1(mmc1)=>{
-                match addr {
-                    0x6000..=0x7FFF => {
-                        mmc1.cart.prg_ram[(addr as usize) - 0x6000]
-                    }
-                    0x8000..=0xBFFF=>{
-                        let idx = mmc1.prg_bank_offsets.0.wrapping_add(addr - 0x8000) as usize;
-                        mmc1.cart.prg_rom[idx]
-                    }
-                    0xC000..=0xFFFF=>{
-                        let idx = mmc1.prg_bank_offsets.1.wrapping_add(addr - 0xC000) as usize;
-                        mmc1.cart.prg_rom[idx]
-                    }
-                    _=>0
+            Mapper1(mmc1) => match addr {
+                0x6000..=0x7FFF => mmc1.cart.prg_ram[(addr as usize) - 0x6000],
+                0x8000..=0xBFFF => {
+                    let idx = mmc1.prg_bank_offsets.0.wrapping_add(addr - 0x8000) as usize;
+                    mmc1.cart.prg_rom[idx]
                 }
-            } 
-            
+                0xC000..=0xFFFF => {
+                    let idx = mmc1.prg_bank_offsets.1.wrapping_add(addr - 0xC000) as usize;
+                    mmc1.cart.prg_rom[idx]
+                }
+                _ => 0,
+            },
         }
     }
 
@@ -254,7 +245,7 @@ impl Mapper {
                     cart.prg_ram[addr as usize - 0x6000] = val;
                 }
             } //
-            _ => todo!("Other Mappers")
+            _ => todo!("Other Mappers"),
         }
     }
 
@@ -271,7 +262,7 @@ impl Mapper {
                 }
                 0
             }
-            _=>todo!("Other Mappers")
+            _ => todo!("Other Mappers"),
         }
     }
 
@@ -282,34 +273,33 @@ impl Mapper {
                 if addr < 0x2000 && cart.chr_banks == 0 {
                     cart.chr_ram[addr as usize] = val;
                 }
-            },
+            }
             Mapper1(mmc1) => {
                 if addr < 0x2000 && mmc1.cart.chr_banks == 0 {
                     mmc1.cart.chr_ram[addr as usize] = val
                 }
             }
-            
         }
     }
     pub fn get_mirror_mode(&self) -> MirrorMode {
         use Mapper::*;
         match self {
             Mapper0(cart) => cart.mirror_mode,
-            Mapper1(MMC1Cartridge{cart,..})=>cart.mirror_mode,
+            Mapper1(MMC1Cartridge { cart, .. }) => cart.mirror_mode,
         }
     }
     pub fn run_scanline_irq(&mut self) {
         use Mapper::*;
         match self {
-            Mapper0(_)=>{},
-            _=>todo!("Mapper4")
+            Mapper0(_) => {}
+            _ => todo!("Mapper4"),
         }
     }
-    pub fn irq_pending(&self)->bool {
+    pub fn irq_pending(&self) -> bool {
         use Mapper::*;
         match self {
             Mapper0(_) => false,
-            _=>todo!("All mappers other besides Mapper0")
+            _ => todo!("All mappers other besides Mapper0"),
         }
     }
 }

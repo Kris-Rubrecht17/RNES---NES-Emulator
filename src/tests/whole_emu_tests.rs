@@ -1,14 +1,5 @@
-#![allow(dead_code)]
-
-mod bus;
-mod cartridge;
-mod cpu;
-mod input;
-mod ppu;
-#[cfg(test)]
-mod tests;
-
-fn main() {
+#[test]
+fn run_nestest() {
     use crate::{
         bus::Bus,
         cartridge::{Cartridge, Mapper},
@@ -21,7 +12,7 @@ fn main() {
     let mapper = Mapper::with_cart(cart);
 
     let mut cpu = CPU::init(Bus::init(mapper));
-
+    cpu.pc = 0xC000;
     let sdl_context = sdl2::init().unwrap();
 
     let video = sdl_context.video().unwrap();
