@@ -111,16 +111,9 @@ impl AddressMode {
                 (effective, penalty)
             }
             Relative => {
-                println!("pc {}", cpu.pc);
                 let offset = cpu.fetch() as i8;
-                println!("offset {offset}");
                 let effective = cpu.pc.wrapping_add_signed(offset as i16);
-                println!("effective: {effective}");
-                let penalty = match Self::get_crosspage_penalty(cpu.pc, effective) {
-                    1 => 1,
-                    _ => 0,
-                };
-
+                let penalty = Self::get_crosspage_penalty(cpu.pc, effective);
                 (effective, penalty)
             }
         }
