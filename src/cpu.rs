@@ -514,10 +514,10 @@ impl CPU {
             0x63 => self.rra(AddressMode::IndirectX, 8),
             0x73 => self.rra(AddressMode::IndirectY, 8),
             0x32 => {
-                println!("{}{}",self.bus.read(2),self.bus.read(3));
+                println!("Illegal Halt!!!!!!");
                 0
             }
-            _ => todo!("{opcode:2X}, {:04X}", self.pc),
+            _ => unreachable!("Undocumented opcode reached: 0x{opcode:02X}"),
         }
     }
 

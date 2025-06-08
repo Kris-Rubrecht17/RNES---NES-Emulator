@@ -17,7 +17,7 @@ fn main() {
     };
     use sdl2::{event::Event, rect::Rect};
 
-    let cart = Cartridge::from_file("test_roms/color_test.nes").unwrap();
+    let cart = Cartridge::from_file("test_roms/nestest.nes").unwrap();
     let mapper = Mapper::with_cart(cart);
 
     let mut cpu = CPU::init(Bus::init(mapper));
@@ -40,7 +40,7 @@ fn main() {
     'running: loop {
         use sdl2::pixels::Color;
 
-        canvas.set_draw_color(Color::RGBA(0xFF, 0, 0, 0xFF));
+        canvas.set_draw_color(Color::RGBA(0x00, 0, 0, 0xFF));
         canvas.clear();
 
         let mut controller_state = 0;

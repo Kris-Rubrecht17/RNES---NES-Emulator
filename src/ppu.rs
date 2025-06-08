@@ -196,7 +196,7 @@ impl PPU {
             0x0000..=0x1FFF => {
                 mapper.ppu_write(addr, val);
             }
-            0x02000..=0x3EFF => {
+            0x2000..=0x3EFF => {
                 let mirrored = Self::mirror_vram_addr(mapper, addr);
                 self.vram[mirrored as usize] = val;
             }
@@ -246,6 +246,7 @@ impl PPU {
                     let t = reg.tmp_vram_addr;
                     reg.tmp_vram_addr = (t & 0xFC1F) | ((val as u16 & 0xF8) << 3);
                 }
+                reg.scroll_latch = !reg.scroll_latch;
             }
             0x2006 => {
                 let mut reg = self.registers.borrow_mut();

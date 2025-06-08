@@ -15,7 +15,7 @@ pub struct Cartridge {
     chr_rom: Vec<u8>,
     prg_banks: i32,
     chr_banks: i32,
-    pub mapper_id: i32,
+    pub mapper_id: u8,
     mirror_horz: bool,
     mirror_vert: bool,
     mirror_mode: MirrorMode,
@@ -75,15 +75,23 @@ impl Cartridge {
             mirror_mode = MirrorMode::Vertical;
         }
 
-        let mapper_id = ((flag6 >> 4) | (flag7 & 0xF0)) as i32;
+        let mapper_id = (flag6 >> 4) | ((flag7 >> 4) << 4);
 
         let prg_size = prg_banks * 16 * 1024;
         let chr_size = chr_banks * 8 * 1024;
 
+        let has_trainer = (flag6 & 0x04) != 0;
         let mut offset = 16;
+        if has_trainer {
+            offset += 512;
+        }
 
         let prg_rom = rom_data[offset..offset + prg_size as usize].to_vec();
+
         offset += prg_size as usize;
+        
+        
+        
         let chr_rom = rom_data[offset..offset + chr_size as usize].to_vec();
 
         let prg_ram = vec![0u8; 8 * 1024];
@@ -119,8 +127,8 @@ pub struct MMC1Cartridge {
     chr_banks: (u8, u8),
     prg_bank: u8,
     shift_count: u8,
-    prg_bank_offsets: (u16, u16),
-    chr_bank_offsets: (u16, u16),
+    prg_bank_offsets: (i32,i32),
+    chr_bank_offsets: (i32, i32),
 }
 impl MMC1Cartridge {
     pub fn with_cartridge(cart: Cartridge) -> Self {
@@ -156,37 +164,42 @@ impl MMC1Cartridge {
         }
     }
     pub fn apply_banks(&mut self) {
+        
         let chr_mode = (self.control >> 4) & 0x01;
 
         if chr_mode == 0 {
-            self.chr_bank_offsets.0 = ((self.chr_banks.0 & 0x1E) as u16) << 12;
+            self.chr_bank_offsets.0 = ((self.chr_banks.0 & 0x1E) as i32) << 12;
             self.chr_bank_offsets.1 = self.chr_bank_offsets.0.wrapping_add(0x1000);
         } else {
-            self.chr_bank_offsets.0 = (self.chr_banks.0 as u16) << 12;
-            self.chr_bank_offsets.1 = (self.chr_banks.1 as u16) << 12;
+            self.chr_bank_offsets.0 = (self.chr_banks.0 as i32) << 12;
+            self.chr_bank_offsets.1 = (self.chr_banks.1 as i32) << 12;
+        }
+        if self.cart.chr_banks > 0 {
+            self.chr_bank_offsets.0 %= self.cart.chr_rom.len() as i32;
+            self.chr_bank_offsets.1 %= self.cart.chr_rom.len() as i32;
         }
 
         let prg_mode = (self.control >> 2) & 0x03;
-        let prg_bank_count = (self.cart.prg_rom.len() >> 14) as u16;
+        let prg_bank_count = (self.cart.prg_rom.len() >> 14) as i32;
 
         match prg_mode {
             0 | 1 => {
-                let bank = ((self.prg_bank & 0x0E) as u16) % prg_bank_count.max(1);
-                self.prg_bank_offsets.0 = bank << 12;
+                let bank = (self.prg_bank & 0x0E) as i32  % prg_bank_count.max(1);
+                self.prg_bank_offsets.0 = bank << 14;
                 self.prg_bank_offsets.1 = self.prg_bank_offsets.0.wrapping_add(0x4000);
             }
             2 => {
                 self.prg_bank_offsets.0 = 0;
-                self.prg_bank_offsets.1 = ((self.prg_bank as u16) % prg_bank_count.max(1)) << 12;
+                self.prg_bank_offsets.1 = ((self.prg_bank as i32) % prg_bank_count.max(1)) << 14;
             }
             3 => {
-                self.prg_bank_offsets.0 = ((self.prg_bank as u16) % prg_bank_count.max(1)) << 12;
-                self.prg_bank_offsets.1 = (prg_bank_count - 1) << 12;
+                self.prg_bank_offsets.0 = ((self.prg_bank as i32) % prg_bank_count.max(1)) << 14;
+                self.prg_bank_offsets.1 = (prg_bank_count - 1) << 14;
             }
             _ => {}
         }
-        self.prg_bank_offsets.0 %= self.cart.prg_rom.len() as u16;
-        self.prg_bank_offsets.1 %= self.cart.prg_rom.len() as u16;
+        self.prg_bank_offsets.0 %= self.cart.prg_rom.len() as i32;
+        self.prg_bank_offsets.1 %= self.cart.prg_rom.len() as i32;
     }
 }
 
@@ -226,11 +239,11 @@ impl Mapper {
             Mapper1(mmc1) => match addr {
                 0x6000..=0x7FFF => mmc1.cart.prg_ram[(addr as usize) - 0x6000],
                 0x8000..=0xBFFF => {
-                    let idx = mmc1.prg_bank_offsets.0.wrapping_add(addr - 0x8000) as usize;
+                    let idx = mmc1.prg_bank_offsets.0.wrapping_add(addr as i32 - 0x8000) as usize;
                     mmc1.cart.prg_rom[idx]
                 }
                 0xC000..=0xFFFF => {
-                    let idx = mmc1.prg_bank_offsets.1.wrapping_add(addr - 0xC000) as usize;
+                    let idx = mmc1.prg_bank_offsets.1.wrapping_add(addr as i32 - 0xC000) as usize;
                     mmc1.cart.prg_rom[idx]
                 }
                 _ => 0,
@@ -247,7 +260,54 @@ impl Mapper {
                     cart.prg_ram[addr as usize - 0x6000] = val;
                 }
             } //
-            _ => todo!("Other Mappers"),
+            Mapper1(mmc1) => {
+          
+                if addr < 0x6000 {
+                    return;
+                }
+                if (0x6000..=0x7FFF).contains(&addr) {
+                    mmc1.cart.prg_ram[addr as usize - 0x6000] = val;
+                }
+
+                if (val & 0x80) != 0 {
+                    mmc1.shift_reg = 0x10;
+                    mmc1.control |= 0x0C;
+                    mmc1.shift_count = 0;
+                    mmc1.apply_banks();
+                    return;
+                }
+
+                mmc1.shift_reg =  (mmc1.shift_reg >> 1) | ((val & 0x01) << 4);
+                mmc1.shift_count += 1;
+
+                if mmc1.shift_count == 5 {
+
+                    let reg = (addr >> 13) & 0x03;
+
+                    match reg {
+                        0 => {
+                            mmc1.control = mmc1.shift_reg & 0x1F;
+                            mmc1.apply_mirroring();
+                        }
+                        1 => {
+                            mmc1.chr_banks.0 = mmc1.shift_reg & 0x1F;
+                            mmc1.apply_mirroring();
+                        }
+                        2=>{
+                            mmc1.chr_banks.1 = mmc1.shift_reg & 0x1F;
+                        }
+                        3 => {
+                            mmc1.prg_bank = mmc1.shift_reg & 0x0F;
+                        }
+                        _ => {}
+                    }
+
+                    mmc1.shift_reg = 0x10;
+                    mmc1.shift_count = 0;
+                    mmc1.apply_banks();
+
+                }
+            },
         }
     }
 
@@ -264,7 +324,32 @@ impl Mapper {
                 }
                 0
             }
-            _ => todo!("Other Mappers"),
+            Mapper1(mmc1) => {
+                if addr < 0x2000 {
+                    if mmc1.cart.chr_banks == 0 {
+                        return mmc1.cart.chr_ram[addr as usize];
+                    }
+
+                      let chr_mode = (mmc1.control >> 4) & 1;
+        let chr_addr = if chr_mode == 0 {
+            (mmc1.chr_banks.0 as usize & 0x1E) * 0x1000 + addr as usize
+        } else {
+            if addr < 0x1000 {
+                mmc1.chr_bank_offsets.0 as usize + addr as usize
+            } else {
+                mmc1.chr_bank_offsets.1 as usize + (addr as usize - 0x1000)
+            }
+        };
+
+        // bounds-safe access (no wrapping!)
+        if chr_addr < mmc1.cart.chr_rom.len() {
+            return mmc1.cart.chr_rom[chr_addr];
+        } else {
+            return 0; // simulate open bus or fallback
+        }
+    }
+    0
+            },
         }
     }
 

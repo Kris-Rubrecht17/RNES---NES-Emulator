@@ -104,7 +104,7 @@ fn run_nestest() {
         cpu.bus.input.borrow_mut().controller_state = controller_state;
         for _ in 0..28781 {
             let cycles = cpu.execute_instruction();
-            if cpu.bus.read(cpu.pc) == 0x32  {
+            if cpu.bus.read(cpu.pc) == 0x32 {
                 break 'running;
             }
             cpu.bus.tick_ppu(cycles * 3);
@@ -118,5 +118,5 @@ fn run_nestest() {
         }
         canvas.present();
     }
-    assert_eq!(0,cpu.bus.read(2) | cpu.bus.read(3))
+    assert_eq!(0, cpu.bus.read(2) | cpu.bus.read(3))
 }
