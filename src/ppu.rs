@@ -136,6 +136,7 @@ impl PPU {
         }
 
         self.render_background(mapper);
+        self.render_sprites(mapper);
     }
     pub fn read(&self, mapper: &Mapper, addr: u16) -> u8 {
         let addr = addr & 0x3FFF;
@@ -337,6 +338,97 @@ impl PPU {
         }
     }
 
+    fn render_sprites(&mut self, mapper : &Mapper) {
+        
+        
+        if(self.registers.borrow_mut().mask & 0x10) == 0 {
+            return;
+        }
+
+        let mut pixel_drawn = vec![false;Self::SCREEN_WIDTH];
+        
+        for i in 0..64 {
+            
+            let offset = i * 4;
+            let (sprite_y,tile_idx,attributes,sprite_x) = (
+                self.oam_ram[offset],
+                self.oam_ram[offset + 1],
+                self.oam_ram[offset + 2],
+                self.oam_ram[offset + 3]
+            );
+
+            let palette_idx = attributes & 0x03;
+            let flip_x = (attributes & 0x40) != 0;
+            let flip_y = (attributes & 0x80) != 0;
+            let priority = (attributes & 0x20) == 0;
+
+            
+
+            let is_8x16 = (self.registers.borrow().control & 0x20) != 0;
+
+            let tile_height = if is_8x16 {16} else {8};
+
+            if self.scanline < sprite_y as u32 || self.scanline >= (sprite_y + tile_height) as u32 {
+                continue;
+            }
+
+            let sub_y = if flip_y {tile_height - 1 - (self.scanline as u8 - sprite_y)} else {self.scanline as u8 - sprite_y};
+
+            let subtile_idx = if is_8x16 {(tile_idx & 0xFE) + (sub_y/8)} else {tile_idx} as u16;
+            
+            let pattern_table = match is_8x16 {
+                true=>{
+                    if (tile_idx & 1) != 0 {0x1000} else {0x0000}
+                },
+                false =>{
+                    if (self.registers.borrow().control & 0x08) != 0 {0x1000} else {0x0000}
+                }
+            };
+            let base_addr = pattern_table + (subtile_idx << 4);
+
+            let plane0 = self.read(mapper,base_addr + (sub_y % 8) as u16);
+            let plane1 = self.read(mapper,base_addr + (sub_y as u16 % 8) + 8);
+
+            for bit in 0..8 {
+                let shift = if flip_x {bit} else {7 - bit};
+                
+                let bit0 = (plane0 >> shift) & 1;
+                let bit1 = (plane1 >> shift) & 1;
+
+                let color = bit0 | (bit1 << 1);
+
+                if color == 0 {
+                    continue;
+                }
+
+                let pixel_x = sprite_x as usize + bit as usize;
+
+                if pixel_x >= Self::SCREEN_WIDTH  {
+                    continue;
+                }
+
+                if i == 0 && self.background_priority[pixel_x ] && color != 0 {
+                    self.registers.borrow_mut().status |= 0x40;
+                }
+
+                if pixel_drawn[pixel_x] {
+                    continue;
+                }
+
+                if !priority && self.background_priority[pixel_x] {
+                    continue;
+                }
+                let idx = self.scanline as usize * Self::SCREEN_WIDTH + pixel_x;
+                self.frame_buffer[idx] = self.fetch_background_color(color, palette_idx);
+                pixel_drawn[pixel_x] = true;
+            }
+
+        }
+
+
+
+    }
+
     fn increment_x(&mut self) {
         if (self.active_render_addr & 0x001F) == 31 {
             self.active_render_addr &= 0xFFE0;
@@ -356,6 +448,13 @@ impl PPU {
         let palette_color_idx = self.palette_ram[palette_ram_idx] as usize;
 
         NES_COLOR_PALETTE[palette_color_idx & 63]
+    }
+    fn fetch_sprite_color(&self,color_idx : u8, palette_idx : u8) -> Color {
+
+        let palette_base = 0x11 + (palette_idx << 2);
+        let palette_color_idx = self.palette_ram[palette_base as usize + (color_idx - 1) as usize] as usize;
+        NES_COLOR_PALETTE[palette_color_idx & 63]
+
     }
     fn mirror_vram_addr(mapper: &Mapper, addr: u16) -> u16 {
         let offset = addr & 0xFFF;
