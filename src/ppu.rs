@@ -242,9 +242,9 @@ impl PPU {
                 } else {
                     reg.scroll_y = val;
                     let t = reg.tmp_vram_addr;
-                    reg.tmp_vram_addr = (t & 0xBFFF) | ((val as u16 & 0x07) << 12);
+                    reg.tmp_vram_addr = (t & 0x8FFF) | ((val as u16 & 0x07) << 12);
                     let t = reg.tmp_vram_addr;
-                    reg.tmp_vram_addr = (t & 0xFC1F) | ((val as u16 & 0xF8) << 3);
+                    reg.tmp_vram_addr = (t & 0xFC1F) | ((val as u16 & 0xF8) << 2);
                 }
                 reg.scroll_latch = !reg.scroll_latch;
             }
@@ -351,7 +351,7 @@ impl PPU {
             let bg_color_idx = self.palette_ram[0] as usize;
             return NES_COLOR_PALETTE[bg_color_idx & 63];
         }
-        let palette_base = (palette_idx << 2).wrapping_add(0x11);
+        let palette_base = (palette_idx << 2).wrapping_add(1);
         let palette_ram_idx = palette_base.wrapping_add(color_idx.wrapping_sub(1)) as usize;
         let palette_color_idx = self.palette_ram[palette_ram_idx] as usize;
 
