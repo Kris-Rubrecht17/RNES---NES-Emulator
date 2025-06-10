@@ -70,8 +70,8 @@ pub struct PPU {
     vram: Vec<u8>,
     palette_ram: [u8; 32],
     pub oam_ram: [u8; 256],
-    pub frame_buffer: Vec<Color>,
-    background_priority: Vec<bool>,
+    pub frame_buffer: Box<[Color; SCREEN_HEIGHT * SCREEN_WIDTH]>,
+    background_priority: Box<[bool; SCREEN_HEIGHT * SCREEN_WIDTH]>,
     active_render_addr: u16,
     scanline: u32,
     scanline_cycle: u32,
@@ -84,8 +84,8 @@ impl PPU {
             vram: vec![0; 2048],
             palette_ram: [0; 32],
             oam_ram: [0; 256],
-            frame_buffer: vec![Color::RGBA(0, 0, 0, 255); SCREEN_HEIGHT * SCREEN_WIDTH],
-            background_priority: vec![false; SCREEN_WIDTH * SCREEN_HEIGHT],
+            frame_buffer: Box::new([Color::BLACK; SCREEN_HEIGHT * SCREEN_WIDTH]),
+            background_priority: Box::new([false; SCREEN_HEIGHT * SCREEN_WIDTH]),
             active_render_addr: 0,
             scanline: 0,
             scanline_cycle: 0,
@@ -95,7 +95,7 @@ impl PPU {
         self.registers.borrow_mut().reset();
         self.vram.fill(0);
         self.oam_ram.fill(0);
-        self.frame_buffer.fill(Color::RGBA(0, 0, 0, 255));
+        self.frame_buffer.fill(Color::BLACK);
         self.background_priority.fill(false);
         self.active_render_addr = 0;
         self.scanline = 0;

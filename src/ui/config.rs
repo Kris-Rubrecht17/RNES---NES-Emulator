@@ -1,3 +1,5 @@
+use sdl2::rect::Rect;
+
 use crate::ppu::{SCREEN_HEIGHT, SCREEN_WIDTH};
 
 pub struct UiConfig {
@@ -6,6 +8,7 @@ pub struct UiConfig {
     pub(super) scale: u32,
     pub(super) offset_x: u32,
     pub(super) offset_y: u32,
+    pub(super) dst_rect: Option<Rect>,
 }
 impl UiConfig {
     pub fn new(width: u32, height: u32) -> Self {
@@ -15,6 +18,7 @@ impl UiConfig {
             scale: 0,
             offset_x: 0,
             offset_y: 0,
+            dst_rect: None,
         };
         cfg.calculate_scale_and_offsets();
         cfg
@@ -32,5 +36,11 @@ impl UiConfig {
 
         self.offset_y = h - self.scale * screen_h;
         self.offset_y >>= 1;
+        self.dst_rect = Some(Rect::new(
+            self.offset_x as i32,
+            self.offset_y as i32,
+            SCREEN_WIDTH as u32 * self.scale,
+            SCREEN_HEIGHT as u32 * self.scale,
+        ))
     }
 }

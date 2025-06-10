@@ -8,27 +8,43 @@ mod input;
 mod ppu;
 mod ui;
 
-use sdl2::pixels::Color;
-use std::sync::mpsc::channel;
+use std::sync::Arc;
+
+use crossbeam_channel::unbounded;
 use ui::{RnesUI, UiEvent};
+
+use crate::ui::frame_buffer::DoubleBuffer;
 
 #[cfg(test)]
 mod tests;
 
 fn main() {
-    let (sx1, rx1) = channel::<Vec<Color>>();
-    let (sx2, rx2) = channel::<UiEvent>();
+    let buf = Arc::new(DoubleBuffer::new());
+    let buf2 = Arc::clone(&buf);
+    let (sx2, rx2) = unbounded::<UiEvent>();
 
     let emu_thread = std::thread::spawn(move || {
         use crate::emulator::Emulator;
 
-        let mut emu = Emulator::new(sx1, rx2);
+        let mut emu = Emulator::new(rx2, buf);
 
         emu.run();
     });
 
-    let mut ui = RnesUI::new(1280, 720, sx2, rx1);
-    ui.run();
+    let sdl2 = sdl2::init().unwrap();
+    let video = sdl2.video().unwrap();
+    let canvas = video
+        .window("RNES", 1280, 720)
+        .build()
+        .unwrap()
+        .into_canvas()
+        .build()
+        .unwrap();
 
+    let texture_creator = canvas.texture_creator();
+
+    let mut ui = RnesUI::new(1280, 720, sx2, canvas, &texture_creator, buf2);
+
+    ui.run();
     emu_thread.join().unwrap();
 }
