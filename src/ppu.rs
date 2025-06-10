@@ -1,8 +1,17 @@
-use std::{cell::RefCell, rc::Rc};
+use std::{
+    cell::RefCell,
+    rc::Rc,
+    sync::{Arc, Mutex},
+};
 
 use sdl2::pixels::Color;
 
 use crate::cartridge::{Mapper, MirrorMode};
+
+
+
+    pub const SCREEN_WIDTH: usize = 256;
+    pub const SCREEN_HEIGHT: usize = 240;
 
 pub struct PPURegisters {
     pub control: u8,
@@ -42,6 +51,23 @@ impl PPURegisters {
             data_buffer: 0,
         }
     }
+    pub fn reset(&mut self) {
+            self.control = 0;
+            self.mask = 0;
+            self.status = 0;
+            self.oam_addr = 0;
+            self.oam_data = 0;
+            self.ppu_addr = 0;
+            self.ppu_data = 0;
+            self.scroll_x = 0;
+            self.scroll_y = 0;
+            self.scroll_latch = false;
+            self.address_latch = false;
+            self.fine_x = 0;
+            self.vram_addr = 0;
+            self.tmp_vram_addr = 0;
+            self.data_buffer = 0;
+    }
 }
 
 pub struct PPU {
@@ -58,22 +84,30 @@ pub struct PPU {
 }
 
 impl PPU {
-    pub const SCREEN_WIDTH: usize = 256;
-    pub const SCREEN_HEIGHT: usize = 240;
+
     pub fn new() -> Self {
         PPU {
             registers: Rc::new(RefCell::new(PPURegisters::new())),
             vram: vec![0; 2048],
             palette_ram: [0; 32],
             oam_ram: [0; 256],
-            frame_buffer: vec![Color::RGBA(0, 0, 0, 0); Self::SCREEN_WIDTH * Self::SCREEN_HEIGHT],
-            background_priority: vec![false; Self::SCREEN_WIDTH * Self::SCREEN_HEIGHT],
+            frame_buffer: vec![Color::RGBA(0, 0, 0, 255); SCREEN_HEIGHT * SCREEN_WIDTH],
+            background_priority: vec![false; SCREEN_WIDTH * SCREEN_HEIGHT],
             active_render_addr: 0,
             scanline: 0,
             scanline_cycle: 0,
         }
     }
-
+    pub fn reset(&mut self) {
+        self.registers.borrow_mut().reset();
+        self.vram.fill(0);
+        self.oam_ram.fill(0);
+        self.frame_buffer.fill(Color::RGBA(0,0,0,255));
+        self.background_priority.fill(false);
+        self.active_render_addr = 0;
+        self.scanline = 0;
+        self.scanline_cycle = 0;
+    }
     pub fn step(
         &mut self,
         mapper: &mut Mapper,
@@ -125,12 +159,12 @@ impl PPU {
     }
 
     fn render_scanline(&mut self, mapper: &mut Mapper) {
-        let base_offset = self.scanline as usize * Self::SCREEN_WIDTH;
-        for color in self.frame_buffer[base_offset..base_offset + Self::SCREEN_WIDTH].iter_mut() {
+        let base_offset = self.scanline as usize * SCREEN_WIDTH;
+        for color in self.frame_buffer[base_offset..base_offset + SCREEN_WIDTH].iter_mut() {
             *color = Color::RGBA(0, 0, 0, 255);
         }
         for prior in
-            self.background_priority[base_offset..base_offset + Self::SCREEN_WIDTH].iter_mut()
+            self.background_priority[base_offset..base_offset + SCREEN_WIDTH].iter_mut()
         {
             *prior = false;
         }
@@ -316,7 +350,7 @@ impl PPU {
 
             for i in 0..8 {
                 let x_coor = (tile << 3) + i - self.registers.borrow().fine_x as i32;
-                if x_coor < 0 || x_coor >= Self::SCREEN_WIDTH as i32 {
+                if x_coor < 0 || x_coor >= SCREEN_WIDTH as i32 {
                     continue;
                 }
 
@@ -326,7 +360,7 @@ impl PPU {
                 let color_idx = bit0 | (bit1 << 1);
 
                 let screen_coor =
-                    (self.scanline as i32 * (Self::SCREEN_WIDTH as i32) + x_coor) as usize;
+                    (self.scanline as i32 * (SCREEN_WIDTH as i32) + x_coor) as usize;
                 if color_idx != 0 {
                     self.background_priority[screen_coor] = true;
                 }
@@ -338,23 +372,20 @@ impl PPU {
         }
     }
 
-    fn render_sprites(&mut self, mapper : &Mapper) {
-        
-        
-        if(self.registers.borrow_mut().mask & 0x10) == 0 {
+    fn render_sprites(&mut self, mapper: &Mapper) {
+        if (self.registers.borrow_mut().mask & 0x10) == 0 {
             return;
         }
 
-        let mut pixel_drawn = vec![false;Self::SCREEN_WIDTH];
-        
+        let mut pixel_drawn = vec![false; SCREEN_WIDTH];
+
         for i in 0..64 {
-            
             let offset = i * 4;
-            let (sprite_y,tile_idx,attributes,sprite_x) = (
+            let (sprite_y, tile_idx, attributes, sprite_x) = (
                 self.oam_ram[offset],
                 self.oam_ram[offset + 1],
                 self.oam_ram[offset + 2],
-                self.oam_ram[offset + 3]
+                self.oam_ram[offset + 3],
             );
 
             let palette_idx = attributes & 0x03;
@@ -362,36 +393,50 @@ impl PPU {
             let flip_y = (attributes & 0x80) != 0;
             let priority = (attributes & 0x20) == 0;
 
-            
-
             let is_8x16 = (self.registers.borrow().control & 0x20) != 0;
 
-            let tile_height = if is_8x16 {16} else {8};
+            let tile_height = if is_8x16 { 16 } else { 8 };
 
             if self.scanline < sprite_y as u32 || self.scanline >= (sprite_y + tile_height) as u32 {
                 continue;
             }
 
-            let sub_y = if flip_y {tile_height - 1 - (self.scanline as u8 - sprite_y)} else {self.scanline as u8 - sprite_y};
+            let sub_y = if flip_y {
+                tile_height - 1 - (self.scanline as u8 - sprite_y)
+            } else {
+                self.scanline as u8 - sprite_y
+            };
 
-            let subtile_idx = if is_8x16 {(tile_idx & 0xFE) + (sub_y/8)} else {tile_idx} as u16;
-            
+            let subtile_idx = if is_8x16 {
+                (tile_idx & 0xFE) + (sub_y / 8)
+            } else {
+                tile_idx
+            } as u16;
+
             let pattern_table = match is_8x16 {
-                true=>{
-                    if (tile_idx & 1) != 0 {0x1000} else {0x0000}
-                },
-                false =>{
-                    if (self.registers.borrow().control & 0x08) != 0 {0x1000} else {0x0000}
+                true => {
+                    if (tile_idx & 1) != 0 {
+                        0x1000
+                    } else {
+                        0x0000
+                    }
+                }
+                false => {
+                    if (self.registers.borrow().control & 0x08) != 0 {
+                        0x1000
+                    } else {
+                        0x0000
+                    }
                 }
             };
             let base_addr = pattern_table + (subtile_idx << 4);
 
-            let plane0 = self.read(mapper,base_addr + (sub_y % 8) as u16);
-            let plane1 = self.read(mapper,base_addr + (sub_y as u16 % 8) + 8);
+            let plane0 = self.read(mapper, base_addr + (sub_y % 8) as u16);
+            let plane1 = self.read(mapper, base_addr + (sub_y as u16 % 8) + 8);
 
             for bit in 0..8 {
-                let shift = if flip_x {bit} else {7 - bit};
-                
+                let shift = if flip_x { bit } else { 7 - bit };
+
                 let bit0 = (plane0 >> shift) & 1;
                 let bit1 = (plane1 >> shift) & 1;
 
@@ -403,11 +448,11 @@ impl PPU {
 
                 let pixel_x = sprite_x as usize + bit as usize;
 
-                if pixel_x >= Self::SCREEN_WIDTH  {
+                if pixel_x >= SCREEN_WIDTH {
                     continue;
                 }
 
-                if i == 0 && self.background_priority[pixel_x ] && color != 0 {
+                if i == 0 && self.background_priority[pixel_x] && color != 0 {
                     self.registers.borrow_mut().status |= 0x40;
                 }
 
@@ -418,15 +463,11 @@ impl PPU {
                 if !priority && self.background_priority[pixel_x] {
                     continue;
                 }
-                let idx = self.scanline as usize * Self::SCREEN_WIDTH + pixel_x;
+                let idx = self.scanline as usize * SCREEN_WIDTH + pixel_x;
                 self.frame_buffer[idx] = self.fetch_background_color(color, palette_idx);
                 pixel_drawn[pixel_x] = true;
             }
-
         }
-
-
-
     }
 
     fn increment_x(&mut self) {
@@ -449,12 +490,11 @@ impl PPU {
 
         NES_COLOR_PALETTE[palette_color_idx & 63]
     }
-    fn fetch_sprite_color(&self,color_idx : u8, palette_idx : u8) -> Color {
-
+    fn fetch_sprite_color(&self, color_idx: u8, palette_idx: u8) -> Color {
         let palette_base = 0x11 + (palette_idx << 2);
-        let palette_color_idx = self.palette_ram[palette_base as usize + (color_idx - 1) as usize] as usize;
+        let palette_color_idx =
+            self.palette_ram[palette_base as usize + (color_idx - 1) as usize] as usize;
         NES_COLOR_PALETTE[palette_color_idx & 63]
-
     }
     fn mirror_vram_addr(mapper: &Mapper, addr: u16) -> u16 {
         let offset = addr & 0xFFF;

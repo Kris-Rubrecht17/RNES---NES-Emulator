@@ -1,4 +1,4 @@
-use std::{cell::RefCell, rc::Rc};
+use std::{cell::RefCell, rc::Rc, sync::{atomic::AtomicU8, Arc}};
 
 use crate::{cartridge::Mapper, input::Input, ppu::PPU};
 
@@ -11,20 +11,34 @@ pub struct Bus {
     pub ppu: PPU,
     pub irq: bool,
     pub nmi_request: bool,
+    pub extra_cycles : i32
 }
 
 impl Bus {
-    pub fn init(cartridge: Mapper) -> Self {
+    pub fn init() -> Self {
         Bus {
-            cartridge,
+            cartridge : Mapper::None,
             input: Rc::new(RefCell::new(Input::new())),
             ram: vec![0; 2048],
             irq: false,
             nmi_request: false,
             ppu: PPU::new(),
+            extra_cycles:0
         }
     }
-
+    pub fn load_cartridge(&mut self, cartridge : Mapper) {
+        self.reset();
+        self.cartridge = cartridge;
+    }
+    pub fn reset(&mut self) {
+        self.input.borrow_mut().controller_state = 0;
+        self.input.borrow_mut().controller_shift = 0;
+        self.ram = vec![0;2048];
+        self.irq = false;
+        self.nmi_request = false;
+        self.ppu.reset();
+        self.extra_cycles = 0;
+    }
     pub fn read(&self, addr: u16) -> u8 {
         match addr {
             0x4016 => self.input.borrow_mut().read(),
@@ -72,6 +86,7 @@ impl Bus {
             self.ppu.oam_ram[oam_addr as usize] = val;
             self.ppu.registers.borrow_mut().oam_addr = oam_addr.wrapping_add(1);
         }
+        self.extra_cycles = 513;
     }
     pub fn tick_ppu(&mut self, elapsed_cycles: i32) {
         let (ppu, mapper, irq, nmi) = (

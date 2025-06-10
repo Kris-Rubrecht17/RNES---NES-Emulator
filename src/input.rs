@@ -1,12 +1,14 @@
+
+
 pub struct Input {
-    pub controller_state: u8,
-    controller_shift: u8,
+    pub(crate) controller_state: u8,
+    pub(crate) controller_shift: u8,
 }
 
 impl Input {
     pub fn new() -> Self {
         Input {
-            controller_state: 0,
+            controller_state:0,
             controller_shift: 0,
         }
     }
@@ -17,7 +19,7 @@ impl Input {
     }
     pub fn write(&mut self, val: u8) {
         if (val & 1) != 0 {
-            self.controller_shift = self.controller_state;
+            self.controller_shift = self.controller_state
         }
     }
 }

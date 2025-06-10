@@ -163,22 +163,25 @@ pub struct CPU {
 }
 
 impl CPU {
-    pub const C: u8 = 1;
-    pub const Z: u8 = 1 << 1;
-    pub const I: u8 = 1 << 2;
-    pub const D: u8 = 1 << 3;
-    pub const B: u8 = 1 << 4;
-    pub const U: u8 = 1 << 5;
-    pub const V: u8 = 1 << 6;
-    pub const N: u8 = 1 << 7;
-    pub fn init(bus: Bus) -> Self {
+    pub const FLAG_C: u8 = 1;
+    pub const FLAG_Z: u8 = 1 << 1;
+    pub const FLAG_I: u8 = 1 << 2;
+    pub const FLAG_D: u8 = 1 << 3;
+    pub const FLAG_B: u8 = 1 << 4;
+    pub const FLAG_U: u8 = 1 << 5;
+    pub const FLAG_V: u8 = 1 << 6;
+    pub const FLAG_N: u8 = 1 << 7;
+    
+    
+    
+    pub fn init() -> Self {
         let mut cpu = CPU {
             a: 0,
             x: 0,
             y: 0,
             sp: 0,
             pc: 0,
-            bus,
+            bus:Bus::init(),
             status: 0,
             ir_disable: false,
         };
@@ -233,8 +236,8 @@ impl CPU {
         (hi << 8) | lo
     }
     fn set_zn(&mut self, val: u8) {
-        self.set_flag(Self::Z, val == 0);
-        self.set_flag(Self::N, (val & 0x80) != 0);
+        self.set_flag(Self::FLAG_Z, val == 0);
+        self.set_flag(Self::FLAG_N, (val & 0x80) != 0);
     }
 
     pub fn execute_instruction(&mut self) -> i32 {
@@ -277,24 +280,24 @@ impl CPU {
             0x0E => self.asl(Absolute, 6),
             0x1E => self.asl(AbsoluteX, 7),
             //conditional branches
-            0x90 => self.brcnd(!self.get_flag(Self::C)),
-            0xB0 => self.brcnd(self.get_flag(Self::C)),
-            0xF0 => self.brcnd(self.get_flag(Self::Z)),
-            0x30 => self.brcnd(self.get_flag(Self::N)),
-            0xD0 => self.brcnd(!self.get_flag(Self::Z)),
-            0x10 => self.brcnd(!self.get_flag(Self::N)),
-            0x70 => self.brcnd(self.get_flag(Self::V)),
-            0x50 => self.brcnd(!self.get_flag(Self::V)),
+            0x90 => self.brcnd(!self.get_flag(Self::FLAG_C)),
+            0xB0 => self.brcnd(self.get_flag(Self::FLAG_C)),
+            0xF0 => self.brcnd(self.get_flag(Self::FLAG_Z)),
+            0x30 => self.brcnd(self.get_flag(Self::FLAG_N)),
+            0xD0 => self.brcnd(!self.get_flag(Self::FLAG_Z)),
+            0x10 => self.brcnd(!self.get_flag(Self::FLAG_N)),
+            0x70 => self.brcnd(self.get_flag(Self::FLAG_V)),
+            0x50 => self.brcnd(!self.get_flag(Self::FLAG_V)),
             //bit test
             0x24 => self.bit(ZeroPage, 3),
             0x2C => self.bit(Absolute, 4),
             //brk
             0x00 => self.brk(),
             //clear flags
-            0x18 => self.clf(Self::C),
-            0xD8 => self.clf(Self::D),
-            0x58 => self.clf(Self::I),
-            0xB8 => self.clf(Self::V),
+            0x18 => self.clf(Self::FLAG_C),
+            0xD8 => self.clf(Self::FLAG_D),
+            0x58 => self.clf(Self::FLAG_I),
+            0xB8 => self.clf(Self::FLAG_V),
             //compare reg to mem
             0xC9 => self.cmp(A, Immediate, 2),
             0xC5 => self.cmp(A, ZeroPage, 3),
@@ -403,9 +406,9 @@ impl CPU {
             0xE1 => self.sbc(IndirectX, 6),
             0xF1 => self.sbc(IndirectY, 5),
             //set flags
-            0x38 => self.stf(Self::C),
-            0xF8 => self.stf(Self::D),
-            0x78 => self.stf(Self::I),
+            0x38 => self.stf(Self::FLAG_C),
+            0xF8 => self.stf(Self::FLAG_D),
+            0x78 => self.stf(Self::FLAG_I),
             //str register
             0x85 => self.sta(ZeroPage, 3),
             0x95 => self.sta(ZeroPageX, 4),
@@ -524,15 +527,15 @@ impl CPU {
     fn adc(&mut self, address_mode: AddressMode, cycles: i32) -> i32 {
         let (addr, extra_cycles) = address_mode.decode(self);
 
-        let carry_in = if self.get_flag(Self::C) { 1 } else { 0 };
+        let carry_in = if self.get_flag(Self::FLAG_C) { 1 } else { 0 };
         let val = self.bus.read(addr) as u16;
 
         let result = self.a as u16 + val + carry_in;
 
-        self.set_flag(Self::C, result > 0xFF);
+        self.set_flag(Self::FLAG_C, result > 0xFF);
         self.set_zn((result & 0xFF) as u8);
         self.set_flag(
-            Self::V,
+            Self::FLAG_V,
             (!(self.a ^ val as u8) & (self.a ^ result as u8) & 0x80) != 0,
         );
 
@@ -561,14 +564,14 @@ impl CPU {
                 let carry_out = (self.a & 0x80) != 0;
                 self.a <<= 1;
                 self.set_zn(self.a);
-                self.set_flag(Self::C, carry_out);
+                self.set_flag(Self::FLAG_C, carry_out);
             }
             _ => {
                 /*
                     Needed for weird dummy-read quirk.
                     It seems that for read-modify-write instructions,
                     'Abolute, X' addressing expects a dummy read, even
-                    when page boundaries have not been crossed. i.e. extra == 0
+                    when page boundaries have not been crossed. FLAG_I.e. extra == 0
                 */
                 let absx = address_mode == AddressMode::AbsoluteX;
 
@@ -586,7 +589,7 @@ impl CPU {
                 self.bus.write(addr, value << 1);
 
                 self.set_zn(value << 1);
-                self.set_flag(Self::C, carry_out);
+                self.set_flag(Self::FLAG_C, carry_out);
             }
         }
 
@@ -612,9 +615,9 @@ impl CPU {
         let (addr, _) = address_mode.decode(self);
         let value = self.bus.read(addr);
 
-        self.set_flag(Self::Z, (value & self.a) == 0);
-        self.set_flag(Self::V, (value & 0b01000000) != 0);
-        self.set_flag(Self::N, (value & 0x80) != 0);
+        self.set_flag(Self::FLAG_Z, (value & self.a) == 0);
+        self.set_flag(Self::FLAG_V, (value & 0b01000000) != 0);
+        self.set_flag(Self::FLAG_N, (value & 0x80) != 0);
 
         cycles
     }
@@ -623,10 +626,10 @@ impl CPU {
         let _ = self.fetch();
 
         self.push_word(self.pc);
-        self.push(self.status | Self::B | Self::U);
+        self.push(self.status | Self::FLAG_B | Self::FLAG_U);
 
-        self.set_flag(Self::B, false);
-        self.set_flag(Self::I, true);
+        self.set_flag(Self::FLAG_B, false);
+        self.set_flag(Self::FLAG_I, true);
 
         self.pc = self.bus.read_word(0xFFFE);
 
@@ -649,9 +652,9 @@ impl CPU {
         let reg = reg.get(self);
         let val = self.bus.read(addr);
 
-        self.set_flag(Self::Z, reg == val);
-        self.set_flag(Self::C, reg >= val);
-        self.set_flag(Self::N, (reg.wrapping_sub(val) & 0x80) != 0);
+        self.set_flag(Self::FLAG_Z, reg == val);
+        self.set_flag(Self::FLAG_C, reg >= val);
+        self.set_flag(Self::FLAG_N, (reg.wrapping_sub(val) & 0x80) != 0);
 
         cycles + extra
     }
@@ -766,9 +769,9 @@ impl CPU {
 
                 self.a = value >> 1;
 
-                self.set_flag(Self::C, carry_out);
-                self.set_flag(Self::Z, self.a == 0);
-                self.set_flag(Self::N, false);
+                self.set_flag(Self::FLAG_C, carry_out);
+                self.set_flag(Self::FLAG_Z, self.a == 0);
+                self.set_flag(Self::FLAG_N, false);
                 //dummy-read
                 self.bus.read(self.pc);
             }
@@ -790,9 +793,9 @@ impl CPU {
 
                 self.bus.write(addr, value >> 1);
 
-                self.set_flag(Self::Z, (value >> 1) == 0);
-                self.set_flag(Self::C, carry_out);
-                self.set_flag(Self::N, false);
+                self.set_flag(Self::FLAG_Z, (value >> 1) == 0);
+                self.set_flag(Self::FLAG_C, carry_out);
+                self.set_flag(Self::FLAG_N, false);
             }
         }
 
@@ -821,7 +824,7 @@ impl CPU {
     fn php(&mut self) -> i32 {
         //dummy-read
         let _ = self.bus.read(self.pc);
-        self.push(self.status | Self::B | Self::U);
+        self.push(self.status | Self::FLAG_B | Self::FLAG_U);
         3
     }
     fn pla(&mut self) -> i32 {
@@ -838,9 +841,9 @@ impl CPU {
         let _ = self.bus.read(self.pc);
         let _ = self.bus.read(self.sp + 0x100);
         let val = self.pop();
-        let status_to_write = val & !(Self::B);
+        let status_to_write = val & !(Self::FLAG_B);
 
-        self.status = status_to_write | Self::U;
+        self.status = status_to_write | Self::FLAG_U;
         4
     }
     fn rol(&mut self, address_mode: AddressMode, cycles: i32) -> i32 {
@@ -849,12 +852,12 @@ impl CPU {
                 //dummy-read
                 self.bus.read(self.pc);
 
-                let carry_in = if self.get_flag(Self::C) { 1 } else { 0 };
+                let carry_in = if self.get_flag(Self::FLAG_C) { 1 } else { 0 };
                 let carry_out = (self.a & 0x80) != 0;
 
                 self.a = (self.a << 1) | carry_in;
 
-                self.set_flag(Self::C, carry_out);
+                self.set_flag(Self::FLAG_C, carry_out);
                 self.set_zn(self.a);
             }
             _ => {
@@ -869,13 +872,13 @@ impl CPU {
 
                 let value = self.bus.read(addr);
 
-                let carry_in = if self.get_flag(Self::C) { 1 } else { 0 };
+                let carry_in = if self.get_flag(Self::FLAG_C) { 1 } else { 0 };
                 let carry_out = (value & 0x80) != 0;
 
                 self.bus.write(addr, value);
                 self.bus.write(addr, (value << 1) | carry_in);
 
-                self.set_flag(Self::C, carry_out);
+                self.set_flag(Self::FLAG_C, carry_out);
                 self.set_zn((value << 1) | carry_in);
             }
         }
@@ -889,12 +892,12 @@ impl CPU {
                 //dummy-read
                 self.bus.read(self.pc);
 
-                let carry_in = if self.get_flag(Self::C) { 0x80 } else { 0 };
+                let carry_in = if self.get_flag(Self::FLAG_C) { 0x80 } else { 0 };
                 let carry_out = (self.a & 0x01) != 0;
 
                 self.a = (self.a >> 1) | carry_in;
 
-                self.set_flag(Self::C, carry_out);
+                self.set_flag(Self::FLAG_C, carry_out);
                 self.set_zn(self.a);
             }
             _ => {
@@ -909,13 +912,13 @@ impl CPU {
 
                 let value = self.bus.read(addr);
 
-                let carry_in = if self.get_flag(Self::C) { 0x80 } else { 0 };
+                let carry_in = if self.get_flag(Self::FLAG_C) { 0x80 } else { 0 };
                 let carry_out = (value & 0x01) != 0;
 
                 self.bus.write(addr, value);
                 self.bus.write(addr, (value >> 1) | carry_in);
 
-                self.set_flag(Self::C, carry_out);
+                self.set_flag(Self::FLAG_C, carry_out);
                 self.set_zn((value >> 1) | carry_in);
             }
         }
@@ -928,8 +931,8 @@ impl CPU {
         let _ = self.bus.read(self.pc);
         let _ = self.bus.read(self.sp + 0x100);
 
-        self.status = self.pop() & !Self::B;
-        self.status |= Self::U;
+        self.status = self.pop() & !Self::FLAG_B;
+        self.status |= Self::FLAG_U;
 
         self.pc = self.pop_word();
 
@@ -950,15 +953,15 @@ impl CPU {
     fn sbc(&mut self, address_mode: AddressMode, cycles: i32) -> i32 {
         let (addr, extra_cycles) = address_mode.decode(self);
 
-        let carry_in = if self.get_flag(Self::C) { 1 } else { 0 };
+        let carry_in = if self.get_flag(Self::FLAG_C) { 1 } else { 0 };
         let val = !self.bus.read(addr) as u16;
 
         let result = self.a as u16 + val + carry_in;
 
-        self.set_flag(Self::C, result > 0xFF);
+        self.set_flag(Self::FLAG_C, result > 0xFF);
         self.set_zn((result & 0xFF) as u8);
         self.set_flag(
-            Self::V,
+            Self::FLAG_V,
             ((self.a ^ result as u8) & (val as u8 ^ result as u8) & 0x80) != 0,
         );
 
@@ -1074,7 +1077,7 @@ impl CPU {
 
         let result = self.a.wrapping_sub(val);
 
-        self.set_flag(Self::C, self.a >= val);
+        self.set_flag(Self::FLAG_C, self.a >= val);
         self.set_zn(result);
 
         cycles + extra
@@ -1095,14 +1098,14 @@ impl CPU {
         val = val.wrapping_add(1);
         self.bus.write(addr, val);
         let nval = !val as u16;
-        let carry = if self.get_flag(Self::C) { 1 } else { 0 };
+        let carry = if self.get_flag(Self::FLAG_C) { 1 } else { 0 };
 
         let result = self.a as u16 + nval + carry;
 
-        self.set_flag(Self::C, result > 0xFF);
+        self.set_flag(Self::FLAG_C, result > 0xFF);
         self.set_zn((result & 0xFF) as u8);
         self.set_flag(
-            Self::V,
+            Self::FLAG_V,
             ((self.a ^ result as u8) & (nval as u8 ^ result as u8) & 0x80) != 0,
         );
 
@@ -1126,7 +1129,7 @@ impl CPU {
         let carry_out = (val & 0x80) != 0;
         val <<= 1;
         self.bus.write(addr, val);
-        self.set_flag(Self::C, carry_out);
+        self.set_flag(Self::FLAG_C, carry_out);
 
         self.a |= val;
         self.set_zn(self.a);
@@ -1147,13 +1150,13 @@ impl CPU {
 
         self.bus.write(addr, val);
         let carry_out = (val & 0x80) != 0;
-        let carry_in = if self.get_flag(Self::C) { 1 } else { 0 };
+        let carry_in = if self.get_flag(Self::FLAG_C) { 1 } else { 0 };
         val = (val << 1) | carry_in;
         self.bus.write(addr, val);
 
         self.a &= val;
 
-        self.set_flag(Self::C, carry_out);
+        self.set_flag(Self::FLAG_C, carry_out);
         self.set_zn(self.a);
 
         cycles + extra
@@ -1179,7 +1182,7 @@ impl CPU {
         self.bus.write(addr, val);
 
         self.a ^= val;
-        self.set_flag(Self::C, carry);
+        self.set_flag(Self::FLAG_C, carry);
         self.set_zn(self.a);
 
         cycles + extra
@@ -1198,21 +1201,21 @@ impl CPU {
 
         self.bus.write(addr, val);
 
-        let carry_in = if self.get_flag(Self::C) { 0x80 } else { 0 };
+        let carry_in = if self.get_flag(Self::FLAG_C) { 0x80 } else { 0 };
         let carry_out = (val & 0x01) != 0;
         val = (val >> 1) | carry_in;
 
         self.bus.write(addr, val);
-        self.set_flag(Self::C, carry_out);
+        self.set_flag(Self::FLAG_C, carry_out);
 
-        let carry = if self.get_flag(Self::C) { 1 } else { 0 };
+        let carry = if self.get_flag(Self::FLAG_C) { 1 } else { 0 };
         let sum = self.a as u16 + val as u16 + carry;
 
-        self.set_flag(Self::C, sum > 0xFF);
+        self.set_flag(Self::FLAG_C, sum > 0xFF);
 
         let result = sum as u8;
 
-        self.set_flag(Self::V, ((self.a ^ result) & (val ^ result) & 0x80) != 0);
+        self.set_flag(Self::FLAG_V, ((self.a ^ result) & (val ^ result) & 0x80) != 0);
 
         self.a = result;
 
@@ -1222,17 +1225,17 @@ impl CPU {
     }
 
     fn irq(&mut self) -> i32 {
-        if !self.get_flag(Self::I) {
+        if !self.get_flag(Self::FLAG_I) {
             //dummy-read
             let _ = self.bus.read(self.sp + 0x100);
 
             self.push_word(self.pc);
-            self.set_flag(Self::B, false);
-            self.set_flag(Self::U, true);
+            self.set_flag(Self::FLAG_B, false);
+            self.set_flag(Self::FLAG_U, true);
 
             self.push(self.status);
 
-            self.set_flag(Self::I, true);
+            self.set_flag(Self::FLAG_I, true);
 
             self.pc = self.bus.read_word(0xFFFE);
 
@@ -1245,10 +1248,10 @@ impl CPU {
         let _ = self.bus.read(self.sp + 0x100);
 
         self.push_word(self.pc);
-        self.set_flag(Self::B, false);
-        self.set_flag(Self::U, true);
+        self.set_flag(Self::FLAG_B, false);
+        self.set_flag(Self::FLAG_U, true);
         self.push(self.status);
-        self.set_flag(Self::I, true);
+        self.set_flag(Self::FLAG_I, true);
 
         self.pc = self.bus.read_word(0xFFFA);
 

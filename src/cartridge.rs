@@ -39,6 +39,8 @@ impl std::fmt::Display for CartridgeLoadError {
 
 impl Error for CartridgeLoadError {}
 
+unsafe impl Send for Cartridge {}
+
 impl Cartridge {
     pub fn from_file<PathLike: AsRef<Path>>(file_path: PathLike) -> Result<Self, Box<dyn Error>> {
         use std::fs::File;
@@ -89,9 +91,7 @@ impl Cartridge {
         let prg_rom = rom_data[offset..offset + prg_size as usize].to_vec();
 
         offset += prg_size as usize;
-        
-        
-        
+
         let chr_rom = rom_data[offset..offset + chr_size as usize].to_vec();
 
         let prg_ram = vec![0u8; 8 * 1024];
@@ -127,9 +127,11 @@ pub struct MMC1Cartridge {
     chr_banks: (u8, u8),
     prg_bank: u8,
     shift_count: u8,
-    prg_bank_offsets: (i32,i32),
+    prg_bank_offsets: (i32, i32),
     chr_bank_offsets: (i32, i32),
 }
+unsafe impl Send for MMC1Cartridge {}
+
 impl MMC1Cartridge {
     pub fn with_cartridge(cart: Cartridge) -> Self {
         let mut cartridge = MMC1Cartridge {
@@ -164,7 +166,6 @@ impl MMC1Cartridge {
         }
     }
     pub fn apply_banks(&mut self) {
-        
         let chr_mode = (self.control >> 4) & 0x01;
 
         if chr_mode == 0 {
@@ -184,7 +185,7 @@ impl MMC1Cartridge {
 
         match prg_mode {
             0 | 1 => {
-                let bank = (self.prg_bank & 0x0E) as i32  % prg_bank_count.max(1);
+                let bank = (self.prg_bank & 0x0E) as i32 % prg_bank_count.max(1);
                 self.prg_bank_offsets.0 = bank << 14;
                 self.prg_bank_offsets.1 = self.prg_bank_offsets.0.wrapping_add(0x4000);
             }
@@ -205,10 +206,11 @@ impl MMC1Cartridge {
 
 #[derive(Clone, Debug)]
 pub enum Mapper {
+    None,
     Mapper0(Cartridge),
     Mapper1(MMC1Cartridge),
 }
-
+unsafe impl Send for Mapper {}
 impl Mapper {
     pub fn with_cart(cart: Cartridge) -> Self {
         match cart.mapper_id {
@@ -224,6 +226,7 @@ impl Mapper {
         use Mapper::*;
 
         match self {
+            None=>0,
             //
             Mapper0(cart) => match addr {
                 0x6000..=0x7FFF => cart.prg_ram[addr as usize - 0x6000],
@@ -254,6 +257,7 @@ impl Mapper {
     pub fn cpu_write(&mut self, addr: u16, val: u8) {
         use Mapper::*;
         match self {
+            None=>{return;},
             //
             Mapper0(cart) => {
                 if (0x6000..=0x7FFF).contains(&addr) {
@@ -261,7 +265,6 @@ impl Mapper {
                 }
             } //
             Mapper1(mmc1) => {
-          
                 if addr < 0x6000 {
                     return;
                 }
@@ -277,11 +280,10 @@ impl Mapper {
                     return;
                 }
 
-                mmc1.shift_reg =  (mmc1.shift_reg >> 1) | ((val & 0x01) << 4);
+                mmc1.shift_reg = (mmc1.shift_reg >> 1) | ((val & 0x01) << 4);
                 mmc1.shift_count += 1;
 
                 if mmc1.shift_count == 5 {
-
                     let reg = (addr >> 13) & 0x03;
 
                     match reg {
@@ -293,7 +295,7 @@ impl Mapper {
                             mmc1.chr_banks.0 = mmc1.shift_reg & 0x1F;
                             mmc1.apply_mirroring();
                         }
-                        2=>{
+                        2 => {
                             mmc1.chr_banks.1 = mmc1.shift_reg & 0x1F;
                         }
                         3 => {
@@ -305,15 +307,15 @@ impl Mapper {
                     mmc1.shift_reg = 0x10;
                     mmc1.shift_count = 0;
                     mmc1.apply_banks();
-
                 }
-            },
+            }
         }
     }
 
     pub fn ppu_read(&self, addr: u16) -> u8 {
         use Mapper::*;
         match self {
+            None =>0,
             Mapper0(cart) => {
                 if addr < 0x2000 {
                     if cart.chr_banks != 0 {
@@ -330,32 +332,33 @@ impl Mapper {
                         return mmc1.cart.chr_ram[addr as usize];
                     }
 
-                      let chr_mode = (mmc1.control >> 4) & 1;
-        let chr_addr = if chr_mode == 0 {
-            (mmc1.chr_banks.0 as usize & 0x1E) * 0x1000 + addr as usize
-        } else {
-            if addr < 0x1000 {
-                mmc1.chr_bank_offsets.0 as usize + addr as usize
-            } else {
-                mmc1.chr_bank_offsets.1 as usize + (addr as usize - 0x1000)
-            }
-        };
+                    let chr_mode = (mmc1.control >> 4) & 1;
+                    let chr_addr = if chr_mode == 0 {
+                        (mmc1.chr_banks.0 as usize & 0x1E) * 0x1000 + addr as usize
+                    } else {
+                        if addr < 0x1000 {
+                            mmc1.chr_bank_offsets.0 as usize + addr as usize
+                        } else {
+                            mmc1.chr_bank_offsets.1 as usize + (addr as usize - 0x1000)
+                        }
+                    };
 
-        // bounds-safe access (no wrapping!)
-        if chr_addr < mmc1.cart.chr_rom.len() {
-            return mmc1.cart.chr_rom[chr_addr];
-        } else {
-            return 0; // simulate open bus or fallback
-        }
-    }
-    0
-            },
+                    // bounds-safe access (no wrapping!)
+                    if chr_addr < mmc1.cart.chr_rom.len() {
+                        return mmc1.cart.chr_rom[chr_addr];
+                    } else {
+                        return 0; // simulate open bus or fallback
+                    }
+                }
+                0
+            }
         }
     }
 
     pub fn ppu_write(&mut self, addr: u16, val: u8) {
         use Mapper::*;
         match self {
+            None=>{return;}
             Mapper0(cart) => {
                 if addr < 0x2000 && cart.chr_banks == 0 {
                     cart.chr_ram[addr as usize] = val;
@@ -371,6 +374,7 @@ impl Mapper {
     pub fn get_mirror_mode(&self) -> MirrorMode {
         use Mapper::*;
         match self {
+            None => MirrorMode::Horizontal,
             Mapper0(cart) => cart.mirror_mode,
             Mapper1(MMC1Cartridge { cart, .. }) => cart.mirror_mode,
         }
