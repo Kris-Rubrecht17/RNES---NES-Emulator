@@ -1,19 +1,22 @@
-use std::sync::{atomic::{AtomicU8, Ordering}, mpsc::{Receiver, Sender}, Arc};
+use std::sync::mpsc::{Receiver, Sender};
 
 use nfd::Response;
-use sdl2::{event::Event, keyboard::{Mod, Scancode}, pixels::Color, rect::Rect, render::Canvas, video::Window, EventPump};
+use sdl2::{
+    EventPump, event::Event, keyboard::Mod, pixels::Color, rect::Rect, render::Canvas,
+    video::Window,
+};
 
-use crate::ppu::{SCREEN_WIDTH,SCREEN_HEIGHT};
 use super::config::UiConfig;
 use super::event::UiEvent;
+use crate::ppu::{SCREEN_HEIGHT, SCREEN_WIDTH};
 
 pub struct RnesUI {
     canvas: Canvas<Window>,
     cfg: UiConfig,
     event_pump: EventPump,
-    event_send : Sender<UiEvent>,
+    event_send: Sender<UiEvent>,
     screen_receive: Receiver<Vec<Color>>,
-    nes_input_state : u8
+    nes_input_state: u8,
 }
 
 impl RnesUI {
@@ -56,7 +59,7 @@ impl RnesUI {
             event_send,
             screen_receive,
             event_pump,
-            nes_input_state:0,
+            nes_input_state: 0,
         }
     }
     fn handle_input(&mut self) -> bool {
@@ -94,21 +97,24 @@ impl RnesUI {
                     Keycode::Right => {
                         self.nes_input_state |= 1 << 7;
                     }
-                    Keycode::O if keymod.intersects(Mod::LCTRLMOD | Mod::RCTRLMOD)=>{
-                        if let Ok(result)    = nfd::open_dialog(Some("nes"),None,nfd::DialogType::SingleFile) {
-
-                                    match result {
-                                        Response::Okay(file_path)=> {
-                                            self.event_send.send(UiEvent::LoadCart(file_path)).unwrap();
-                                            return true;
-                                        }
-                                        _=>{return true;}
-                                    }
-
-
+                    Keycode::O if keymod.intersects(Mod::LCTRLMOD | Mod::RCTRLMOD) => {
+                        if let Ok(result) =
+                            nfd::open_dialog(Some("nes"), None, nfd::DialogType::SingleFile)
+                        {
+                            match result {
+                                Response::Okay(file_path) => {
+                                    self.event_send.send(UiEvent::LoadCart(file_path)).unwrap();
+                                    return true;
                                 }
+                                _ => {
+                                    return true;
+                                }
+                            }
+                        }
                     }
-                    _ => {return true;}
+                    _ => {
+                        return true;
+                    }
                 },
                 Event::KeyUp {
                     keycode: Some(keycode),
@@ -142,11 +148,11 @@ impl RnesUI {
                 },
                 _ => {}
             }
-            
         }
-        self.event_send.send(UiEvent::ControllerInput(self.nes_input_state)).unwrap();
+        self.event_send
+            .send(UiEvent::ControllerInput(self.nes_input_state))
+            .unwrap();
         true
-        
     }
     fn render_nes_framebuffer(&mut self, framebuffer: Vec<Color>) {
         for i in 0..SCREEN_HEIGHT {
@@ -166,17 +172,15 @@ impl RnesUI {
     }
     pub fn run(&mut self) {
         'running: loop {
-            //A quit event returns false and sends a quit signal to the emulator thread. 
+            //A quit event returns false and sends a quit signal to the emulator thread.
             if !self.handle_input() {
                 break 'running;
             }
 
-            
             if let Ok(framebuffer) = self.screen_receive.try_recv() {
                 self.render_nes_framebuffer(framebuffer);
                 self.canvas.present();
-            }   
+            }
         }
     }
 }
-

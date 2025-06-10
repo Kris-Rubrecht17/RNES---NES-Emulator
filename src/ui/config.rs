@@ -1,6 +1,4 @@
-
-
-use crate::ppu::{SCREEN_WIDTH,SCREEN_HEIGHT};
+use crate::ppu::{SCREEN_HEIGHT, SCREEN_WIDTH};
 
 pub struct UiConfig {
     pub(super) width: u32,

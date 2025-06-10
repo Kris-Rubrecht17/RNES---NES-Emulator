@@ -226,7 +226,7 @@ impl Mapper {
         use Mapper::*;
 
         match self {
-            None=>0,
+            None => 0,
             //
             Mapper0(cart) => match addr {
                 0x6000..=0x7FFF => cart.prg_ram[addr as usize - 0x6000],
@@ -257,7 +257,9 @@ impl Mapper {
     pub fn cpu_write(&mut self, addr: u16, val: u8) {
         use Mapper::*;
         match self {
-            None=>{return;},
+            None => {
+                return;
+            }
             //
             Mapper0(cart) => {
                 if (0x6000..=0x7FFF).contains(&addr) {
@@ -315,7 +317,7 @@ impl Mapper {
     pub fn ppu_read(&self, addr: u16) -> u8 {
         use Mapper::*;
         match self {
-            None =>0,
+            None => 0,
             Mapper0(cart) => {
                 if addr < 0x2000 {
                     if cart.chr_banks != 0 {
@@ -358,7 +360,9 @@ impl Mapper {
     pub fn ppu_write(&mut self, addr: u16, val: u8) {
         use Mapper::*;
         match self {
-            None=>{return;}
+            None => {
+                return;
+            }
             Mapper0(cart) => {
                 if addr < 0x2000 && cart.chr_banks == 0 {
                     cart.chr_ram[addr as usize] = val;

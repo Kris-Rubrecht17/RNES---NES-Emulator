@@ -171,9 +171,7 @@ impl CPU {
     pub const FLAG_U: u8 = 1 << 5;
     pub const FLAG_V: u8 = 1 << 6;
     pub const FLAG_N: u8 = 1 << 7;
-    
-    
-    
+
     pub fn init() -> Self {
         let mut cpu = CPU {
             a: 0,
@@ -181,7 +179,7 @@ impl CPU {
             y: 0,
             sp: 0,
             pc: 0,
-            bus:Bus::init(),
+            bus: Bus::init(),
             status: 0,
             ir_disable: false,
         };
@@ -1215,7 +1213,10 @@ impl CPU {
 
         let result = sum as u8;
 
-        self.set_flag(Self::FLAG_V, ((self.a ^ result) & (val ^ result) & 0x80) != 0);
+        self.set_flag(
+            Self::FLAG_V,
+            ((self.a ^ result) & (val ^ result) & 0x80) != 0,
+        );
 
         self.a = result;
 

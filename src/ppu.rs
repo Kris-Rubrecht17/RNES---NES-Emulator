@@ -1,17 +1,11 @@
-use std::{
-    cell::RefCell,
-    rc::Rc,
-    sync::{Arc, Mutex},
-};
+use std::{cell::RefCell, rc::Rc};
 
 use sdl2::pixels::Color;
 
 use crate::cartridge::{Mapper, MirrorMode};
 
-
-
-    pub const SCREEN_WIDTH: usize = 256;
-    pub const SCREEN_HEIGHT: usize = 240;
+pub const SCREEN_WIDTH: usize = 256;
+pub const SCREEN_HEIGHT: usize = 240;
 
 pub struct PPURegisters {
     pub control: u8,
@@ -52,21 +46,21 @@ impl PPURegisters {
         }
     }
     pub fn reset(&mut self) {
-            self.control = 0;
-            self.mask = 0;
-            self.status = 0;
-            self.oam_addr = 0;
-            self.oam_data = 0;
-            self.ppu_addr = 0;
-            self.ppu_data = 0;
-            self.scroll_x = 0;
-            self.scroll_y = 0;
-            self.scroll_latch = false;
-            self.address_latch = false;
-            self.fine_x = 0;
-            self.vram_addr = 0;
-            self.tmp_vram_addr = 0;
-            self.data_buffer = 0;
+        self.control = 0;
+        self.mask = 0;
+        self.status = 0;
+        self.oam_addr = 0;
+        self.oam_data = 0;
+        self.ppu_addr = 0;
+        self.ppu_data = 0;
+        self.scroll_x = 0;
+        self.scroll_y = 0;
+        self.scroll_latch = false;
+        self.address_latch = false;
+        self.fine_x = 0;
+        self.vram_addr = 0;
+        self.tmp_vram_addr = 0;
+        self.data_buffer = 0;
     }
 }
 
@@ -84,7 +78,6 @@ pub struct PPU {
 }
 
 impl PPU {
-
     pub fn new() -> Self {
         PPU {
             registers: Rc::new(RefCell::new(PPURegisters::new())),
@@ -102,7 +95,7 @@ impl PPU {
         self.registers.borrow_mut().reset();
         self.vram.fill(0);
         self.oam_ram.fill(0);
-        self.frame_buffer.fill(Color::RGBA(0,0,0,255));
+        self.frame_buffer.fill(Color::RGBA(0, 0, 0, 255));
         self.background_priority.fill(false);
         self.active_render_addr = 0;
         self.scanline = 0;
@@ -163,9 +156,7 @@ impl PPU {
         for color in self.frame_buffer[base_offset..base_offset + SCREEN_WIDTH].iter_mut() {
             *color = Color::RGBA(0, 0, 0, 255);
         }
-        for prior in
-            self.background_priority[base_offset..base_offset + SCREEN_WIDTH].iter_mut()
-        {
+        for prior in self.background_priority[base_offset..base_offset + SCREEN_WIDTH].iter_mut() {
             *prior = false;
         }
 
@@ -359,8 +350,7 @@ impl PPU {
                 let bit1 = (plane1 >> bit_idx) & 1;
                 let color_idx = bit0 | (bit1 << 1);
 
-                let screen_coor =
-                    (self.scanline as i32 * (SCREEN_WIDTH as i32) + x_coor) as usize;
+                let screen_coor = (self.scanline as i32 * (SCREEN_WIDTH as i32) + x_coor) as usize;
                 if color_idx != 0 {
                     self.background_priority[screen_coor] = true;
                 }

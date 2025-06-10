@@ -1,5 +1,3 @@
-
-
 pub struct Input {
     pub(crate) controller_state: u8,
     pub(crate) controller_shift: u8,
@@ -8,7 +6,7 @@ pub struct Input {
 impl Input {
     pub fn new() -> Self {
         Input {
-            controller_state:0,
+            controller_state: 0,
             controller_shift: 0,
         }
     }
