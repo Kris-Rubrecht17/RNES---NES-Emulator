@@ -17,7 +17,6 @@ pub struct PPURegisters {
     pub scroll_y: u8,
     pub ppu_addr: u16,
     pub ppu_data: u8,
-    pub scroll_latch: bool,
     pub address_latch: bool,
     pub fine_x: u8,
     pub vram_addr: u16,
@@ -37,7 +36,6 @@ impl PPURegisters {
             ppu_data: 0,
             scroll_x: 0,
             scroll_y: 0,
-            scroll_latch: false,
             address_latch: false,
             fine_x: 0,
             vram_addr: 0,
@@ -55,8 +53,7 @@ impl PPURegisters {
         self.ppu_data = 0;
         self.scroll_x = 0;
         self.scroll_y = 0;
-        self.scroll_latch = false;
-        self.address_latch = false;
+        self.address_latch =false;
         self.fine_x = 0;
         self.vram_addr = 0;
         self.tmp_vram_addr = 0;
@@ -72,7 +69,6 @@ pub struct PPU {
     pub oam_ram: [u8; 256],
     pub frame_buffer: Box<[Color; SCREEN_HEIGHT * SCREEN_WIDTH]>,
     background_priority: Box<[bool; SCREEN_HEIGHT * SCREEN_WIDTH]>,
-    active_render_addr: u16,
     scanline: u32,
     scanline_cycle: u32,
 }
@@ -86,7 +82,6 @@ impl PPU {
             oam_ram: [0; 256],
             frame_buffer: Box::new([Color::BLACK; SCREEN_HEIGHT * SCREEN_WIDTH]),
             background_priority: Box::new([false; SCREEN_HEIGHT * SCREEN_WIDTH]),
-            active_render_addr: 0,
             scanline: 0,
             scanline_cycle: 0,
         }
@@ -97,7 +92,6 @@ impl PPU {
         self.oam_ram.fill(0);
         self.frame_buffer.fill(Color::BLACK);
         self.background_priority.fill(false);
-        self.active_render_addr = 0;
         self.scanline = 0;
         self.scanline_cycle = 0;
     }
@@ -109,41 +103,115 @@ impl PPU {
         elapsed_cycles: i32,
     ) {
         for _ in 0..elapsed_cycles {
-            if self.scanline == 0 && self.scanline_cycle == 0 {
-                self.registers.borrow_mut().status &= 0x3F;
-            }
+            let mut registers = self.registers.borrow_mut();
 
-            if self.scanline < 240 && self.scanline_cycle == 260 {
-                //[TODO:] Mapper4 and cartridge irq
-            }
+            // PPU Clocking and VRAM address updates
+            let rendering_enabled = (registers.mask & 0x18) != 0;
 
-            self.scanline_cycle += 1;
-
-            if self.scanline_cycle >= 341 {
-                self.scanline_cycle = 0;
-
-                if self.scanline < 240 {
-                    //[TODO] copy addr, render scanline, increment y
-                    self.copy_tmp_to_vram_addr();
-                    self.render_scanline(mapper);
-                    self.increment_y();
+            // VBLANK Start
+            if self.scanline == 241 && self.scanline_cycle == 1 {
+                registers.status |= 0x80; // Set VBLANK flag
+                if (registers.control & 0x80) != 0 {
+                    *nmi = true;
                 }
+                println!("PPU ENTERING VBLANK");
+            }
 
-                if self.scanline == 241 {
-                    let mut registers = self.registers.borrow_mut();
-                    registers.status |= 0x80;
-                    if (registers.control & 0x80) != 0 {
-                        *nmi = true;
+            // VBLANK End, clear flags
+            if self.scanline == 261 && self.scanline_cycle == 1 {
+                registers.status &= !0x80; // Clear VBLANK flag
+                registers.status &= !0x40; // Clear sprite zero hit
+                registers.status &= !0x20; // Clear sprite overflow
+            }
+
+            // Rendering period (scanlines 0-239 and pre-render scanline 261)
+            if rendering_enabled && (self.scanline < 240 || self.scanline == 261) {
+                // No longer render visible scanlines at cycle 1
+
+                // Sprite evaluation (cycles 1-64)
+                if self.scanline_cycle >= 1 && self.scanline_cycle <= 64 {
+                    let next_scanline = if self.scanline == 261 { 0 } else { self.scanline + 1 };
+                    let mut sprite_count = 0;
+                    
+                    // Only evaluate sprites for visible scanlines
+                    if next_scanline < 240 {
+                        for i in 0..64 {
+                            let offset = i * 4;
+                            let sprite_y = self.oam_ram[offset];
+                            let tile_height = if (registers.control & 0x20) != 0 { 16 } else { 8 };
+                            
+                            if next_scanline >= sprite_y as u32 && next_scanline < (sprite_y + tile_height) as u32 {
+                                sprite_count += 1;
+                                if sprite_count > 8 {
+                                    registers.status |= 0x20; // Set sprite overflow flag
+                                    break;
+                                }
+                            }
+                        }
                     }
                 }
 
-                if self.scanline == 261 {
-                    let mut reg = self.registers.borrow_mut();
-                    reg.vram_addr = reg.tmp_vram_addr;
+                // Vertical VRAM increment at cycle 256
+                if self.scanline_cycle == 256 {
+                    // Render visible scanlines at cycle 256
+                    
+
+                    // Inlined increment_y logic
+                    if (registers.vram_addr & 0x7000) != 0x7000 {
+                        registers.vram_addr = registers.vram_addr.wrapping_add(0x1000);
+                    } else {
+                        registers.vram_addr &= 0x8FFF;
+                        let y = (registers.vram_addr & 0x03E0) >> 5;
+
+                        let y = match y {
+                            29 => {
+                                registers.vram_addr ^= 0x0800;
+                                0
+                            }
+                            31 => 0,
+                            _ => y.wrapping_add(1),
+                        };
+
+                        registers.vram_addr = (registers.vram_addr & 0xFC1F) | (y << 5);
+                    }
                 }
 
-                self.scanline += 1;
+                // Horizontal VRAM copy from tmp_vram_addr at cycle 257
+                if self.scanline_cycle == 257 {
+                    registers.vram_addr = (registers.vram_addr & 0xFBE0) | (registers.tmp_vram_addr & 0x041F);
+                    
+                    // Reset horizontal scroll for scanlines 0-7 (non-scrolling region)
+                    
+                    // Render visible scanlines at cycle 257
+                    
+                }
 
+                // Pre-render scanline specific VRAM copies
+                if self.scanline == 261 {
+                    // Vertical VRAM copy from tmp_vram_addr at cycles 280-304
+                    if self.scanline_cycle >= 280 && self.scanline_cycle <= 304 {
+                        registers.vram_addr = (registers.vram_addr & 0x841F) | (registers.tmp_vram_addr & 0x7BE0);
+                    }
+                    // Horizontal VRAM copy from tmp_vram_addr at cycles 328 and 336
+                    if self.scanline_cycle == 328 || self.scanline_cycle == 336 {
+                        registers.vram_addr = (registers.vram_addr & 0xFBE0) | (registers.tmp_vram_addr & 0x041F);
+                    }
+                }
+            }
+
+            // Increment cycle and scanline
+            self.scanline_cycle += 1;
+
+            // No longer render scanline here
+            if self.scanline_cycle >= 341 {
+                self.scanline_cycle = 0;
+                
+                // No need to render scanline here anymore
+                self.scanline += 1;
+                if self.scanline < 240 {
+                    drop(registers); // Release mutable borrow before calling render_scanline
+                    self.render_scanline(mapper); // Re-borrow after render_scanline
+                }
                 if self.scanline > 261 {
                     self.scanline = 0;
                 }
@@ -152,6 +220,7 @@ impl PPU {
     }
 
     fn render_scanline(&mut self, mapper: &mut Mapper) {
+        
         let base_offset = self.scanline as usize * SCREEN_WIDTH;
         for color in self.frame_buffer[base_offset..base_offset + SCREEN_WIDTH].iter_mut() {
             *color = Color::RGBA(0, 0, 0, 255);
@@ -186,9 +255,10 @@ impl PPU {
         match addr {
             0x2000 => self.registers.borrow().control,
             0x2002 => {
-                let result = self.registers.borrow().status;
-                self.registers.borrow_mut().status &= 0x3F;
-                self.registers.borrow_mut().address_latch = false;
+                let mut registers = self.registers.borrow_mut();
+                let result = registers.status;
+                registers.status &= !(0x80 | 0x40 | 0x20);
+                registers.address_latch = false;
                 result
             }
             0x2004 => self.oam_ram[self.registers.borrow().oam_addr as usize],
@@ -239,7 +309,10 @@ impl PPU {
     pub fn write_register(&mut self, mapper: &mut Mapper, addr: u16, val: u8) {
         match addr {
             0x2000 => {
-                self.registers.borrow_mut().control = val;
+                let mut reg = self.registers.borrow_mut();
+                reg.control = val;
+                // Update nametable select bits in tmp_vram_addr from PPUCTRL
+                reg.tmp_vram_addr = (reg.tmp_vram_addr & 0xF3FF) | ((val as u16 & 0x03) << 10);
             }
             0x2001 => {
                 self.registers.borrow_mut().mask = val;
@@ -247,7 +320,7 @@ impl PPU {
             0x2002 => {
                 let mut reg = self.registers.borrow_mut();
                 (*reg).status &= 0x7F;
-                (*reg).scroll_latch = false;
+                (*reg).address_latch = false;
             }
             0x2003 => {
                 self.registers.borrow_mut().oam_addr = val;
@@ -260,19 +333,17 @@ impl PPU {
             }
             0x2005 => {
                 let mut reg = self.registers.borrow_mut();
-                if !reg.scroll_latch {
+                if !reg.address_latch {
                     reg.scroll_x = val;
                     reg.fine_x = val & 0x07;
                     let t = reg.tmp_vram_addr;
                     reg.tmp_vram_addr = (t & 0xFFE0) | (val as u16 >> 3);
                 } else {
                     reg.scroll_y = val;
-                    let t = reg.tmp_vram_addr;
-                    reg.tmp_vram_addr = (t & 0x8FFF) | ((val as u16 & 0x07) << 12);
-                    let t = reg.tmp_vram_addr;
-                    reg.tmp_vram_addr = (t & 0xFC1F) | ((val as u16 & 0xF8) << 2);
+                    reg.tmp_vram_addr = (reg.tmp_vram_addr & 0x8FFF) | ((val as u16 & 0x07) << 12);
+                    reg.tmp_vram_addr = (reg.tmp_vram_addr & 0xFC1F) | ((val as u16 & 0xF8) << 2);
                 }
-                reg.scroll_latch = !reg.scroll_latch;
+                reg.address_latch = !reg.address_latch;
             }
             0x2006 => {
                 let mut reg = self.registers.borrow_mut();
@@ -305,18 +376,17 @@ impl PPU {
             return;
         }
 
-        self.active_render_addr = self.registers.borrow().vram_addr;
-
-        for tile in 0..33 {
-            let coarse_x = self.active_render_addr & 0x001F;
-            let coarse_y = (self.active_render_addr >> 5) & 0x001F;
-            let name_table = (self.active_render_addr >> 10) & 0x0003;
+        let mut current_vram_addr = self.registers.borrow().vram_addr;
+        for tile_num in 0..33 {
+            let coarse_x = current_vram_addr & 0x001F;
+            let coarse_y = (current_vram_addr >> 5) & 0x001F;
+            let name_table = (current_vram_addr >> 10) & 0x0003;
 
             let base_name_table_addr = 0x2000 + (name_table << 10);
             let tile_addr = base_name_table_addr + (coarse_y << 5) + coarse_x;
             let tile_idx = self.read(mapper, tile_addr) as u16;
 
-            let fine_y = (self.active_render_addr >> 12) & 0x07;
+            let fine_y = (current_vram_addr >> 12) & 0x07;
 
             let pattern_table = if (self.registers.borrow().control & 0x10) != 0 {
                 0x1000
@@ -336,12 +406,25 @@ impl PPU {
                 .wrapping_add(attribute_x);
             let attribute_byte = self.read(mapper, attribute_addr);
 
-            let attribute_shift = (((coarse_y & 0x03) >> 1) << 2) + (coarse_x & 0x02);
+            let attribute_shift = ((coarse_y & 0x02) << 1) | (coarse_x & 0x02);
             let palette_idx = (attribute_byte >> attribute_shift) & 0x03;
 
+            // Get fine_x, but set to 0 for scanlines 0-7 (non-scrolling region)
+            let current_fine_x = if self.scanline < 8 {
+                0
+            } else {
+                self.registers.borrow().fine_x as i32
+            };
+
             for i in 0..8 {
-                let x_coor = (tile << 3) + i - self.registers.borrow().fine_x as i32;
-                if x_coor < 0 || x_coor >= SCREEN_WIDTH as i32 {
+                let pixel_x_on_screen = (tile_num as i32 * 8) + i as i32 - current_fine_x;
+
+                // Apply background leftmost 8-pixel mask
+                if pixel_x_on_screen < 8 && (self.registers.borrow().mask & 0x02) == 0 {
+                    continue;
+                }
+
+                if pixel_x_on_screen < 0 || pixel_x_on_screen >= SCREEN_WIDTH as i32 {
                     continue;
                 }
 
@@ -350,7 +433,7 @@ impl PPU {
                 let bit1 = (plane1 >> bit_idx) & 1;
                 let color_idx = bit0 | (bit1 << 1);
 
-                let screen_coor = (self.scanline as i32 * (SCREEN_WIDTH as i32) + x_coor) as usize;
+                let screen_coor = (self.scanline as i32 * (SCREEN_WIDTH as i32) + pixel_x_on_screen) as usize;
                 if color_idx != 0 {
                     self.background_priority[screen_coor] = true;
                 }
@@ -358,7 +441,13 @@ impl PPU {
                 self.frame_buffer[screen_coor] =
                     self.fetch_background_color(color_idx, palette_idx);
             }
-            self.increment_x();
+            // Inlined increment_x logic
+            if (current_vram_addr & 0x001F) == 31 {
+                current_vram_addr &= 0xFFE0;
+                current_vram_addr ^= 0x0400; // Toggle nametable X
+            } else {
+                current_vram_addr += 1; // Increment coarse X
+            }
         }
     }
 
@@ -368,7 +457,7 @@ impl PPU {
         }
 
         let mut pixel_drawn = vec![false; SCREEN_WIDTH];
-
+        let mut scanline_sprites = 0;
         for i in 0..64 {
             let offset = i * 4;
             let (sprite_y, tile_idx, attributes, sprite_x) = (
@@ -438,11 +527,16 @@ impl PPU {
 
                 let pixel_x = sprite_x as usize + bit as usize;
 
-                if pixel_x >= SCREEN_WIDTH {
+                // Apply sprite leftmost 8-pixel mask
+                if pixel_x < 8 && (self.registers.borrow().mask & 0x04) == 0 {
                     continue;
                 }
 
-                if i == 0 && self.background_priority[pixel_x] && color != 0 {
+                if pixel_x >= SCREEN_WIDTH {
+                    continue;
+                }
+                let idx = self.scanline as usize * SCREEN_WIDTH + pixel_x;
+                if i == 0 && self.background_priority[idx] && color != 0 {
                     self.registers.borrow_mut().status |= 0x40;
                 }
 
@@ -450,22 +544,13 @@ impl PPU {
                     continue;
                 }
 
-                if !priority && self.background_priority[pixel_x] {
+                if !priority && self.background_priority[idx] {
                     continue;
                 }
-                let idx = self.scanline as usize * SCREEN_WIDTH + pixel_x;
-                self.frame_buffer[idx] = self.fetch_background_color(color, palette_idx);
+                scanline_sprites += 1;
+                self.frame_buffer[idx] = self.fetch_sprite_color(color, palette_idx);
                 pixel_drawn[pixel_x] = true;
             }
-        }
-    }
-
-    fn increment_x(&mut self) {
-        if (self.active_render_addr & 0x001F) == 31 {
-            self.active_render_addr &= 0xFFE0;
-            self.active_render_addr ^= 0x0400;
-        } else {
-            self.active_render_addr += 1;
         }
     }
 
@@ -498,31 +583,6 @@ impl PPU {
             Horizontal => ((nt_idx / 2) * 0x400 + inner_offset) as u16,
             SingleScreenA => inner_offset as u16,
             SingleScreenB => (0x400 + inner_offset) as u16,
-        }
-    }
-    fn copy_tmp_to_vram_addr(&mut self) {
-        let mut registers = self.registers.borrow_mut();
-        registers.vram_addr = (registers.vram_addr & 0xFBE0) | (registers.tmp_vram_addr & 0x041F);
-    }
-    fn increment_y(&mut self) {
-        let mut reg = self.registers.borrow_mut();
-
-        if (reg.vram_addr & 0x7000) != 0x7000 {
-            reg.vram_addr = reg.vram_addr.wrapping_add(0x1000);
-        } else {
-            reg.vram_addr &= 0x8FFF;
-            let y = (reg.vram_addr & 0x03E0) >> 5;
-
-            let y = match y {
-                29 => {
-                    reg.vram_addr ^= 0x0800;
-                    0
-                }
-                31 => 0,
-                _ => y.wrapping_add(1),
-            };
-
-            reg.vram_addr = (reg.vram_addr & 0xFC1F) | (y << 5);
         }
     }
 }
