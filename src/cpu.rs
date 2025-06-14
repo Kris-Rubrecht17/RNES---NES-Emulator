@@ -239,6 +239,13 @@ impl CPU {
     }
 
     pub fn execute_instruction(&mut self) -> i32 {
+        //Skip cycles for OAM DMA
+        if self.bus.extra_cycles > 0 {
+            self.bus.extra_cycles -= 1;
+            return 1;
+        }
+        
+        
         if self.bus.nmi_request {
             self.bus.nmi_request = false;
             return self.nmi();
@@ -439,6 +446,7 @@ impl CPU {
             0x97 => self.sax(ZeroPageY, 4),
             0x8F => self.sax(Absolute, 4),
             0x83 => self.sax(IndirectX, 6),
+            //unnoficial nops
             0x04 => self.multibyte_nop(AddressMode::ZeroPage, 3),
             0x44 => self.multibyte_nop(AddressMode::ZeroPage, 3),
             0x64 => self.multibyte_nop(AddressMode::ZeroPage, 3),
@@ -462,8 +470,13 @@ impl CPU {
             0x3A => self.nop(),
             0x5A => self.nop(),
             0x7A => self.nop(),
-            0xDA => self.multibyte_nop(AddressMode::AbsoluteX, 4),
+            0xDA => self.nop(),
+            0xFA=>self.nop(),
             0x89 => self.multibyte_nop(AddressMode::Immediate, 2),
+            0x80 =>self.multibyte_nop(AddressMode::Immediate, 2),
+            0x82=>self.multibyte_nop(AddressMode::Immediate, 2),
+            0xC2 => self.multibyte_nop(AddressMode::Immediate, 2),
+            0xE2 => self.multibyte_nop(AddressMode::Immediate, 2),
             //unofficial sbc
             0xEB => self.sbc(Immediate, 2),
             //dcp
@@ -518,6 +531,8 @@ impl CPU {
                 println!("Illegal Halt!!!!!!");
                 0
             }
+            0x0B=>self.aac(),
+            0x2B=>self.aac(),
             _ => unreachable!("Undocumented opcode reached: 0x{opcode:02X}"),
         }
     }
@@ -1258,4 +1273,14 @@ impl CPU {
 
         7
     }
+    fn aac(&mut self)->i32 {
+        
+        self.a &= if self.get_flag(Self::FLAG_C) {0x01} else {0};
+        self.set_flag(Self::FLAG_C,(self.a & 0x01) != 0);
+
+        self.set_zn(self.a);
+
+        2
+    }
+    
 }

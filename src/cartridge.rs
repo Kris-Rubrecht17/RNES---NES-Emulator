@@ -70,7 +70,7 @@ impl Cartridge {
 
         let mirror_vert = (flag6 & 0x01) != 0;
         let mirror_horz = !mirror_vert;
-
+        let has_battery = (flag6 & 0x02) != 0;
         let mut mirror_mode = MirrorMode::Horizontal;
 
         if (flag6 & 0x08) == 0 && (flag6 & 1) != 0 {
@@ -107,7 +107,7 @@ if has_trainer {
             mirror_horz,
             mirror_vert,
             mirror_mode,
-            has_battery: false,
+            has_battery,
             prg_ram,
             chr_ram,
         }
@@ -116,6 +116,19 @@ if has_trainer {
         self.mirror_mode = mode;
         self.mirror_vert = mode == MirrorMode::Vertical;
         self.mirror_horz = mode == MirrorMode::Horizontal;
+    }
+    pub fn save(&self){
+        if self.has_battery {
+            use std::io::Write;
+            let mut file = std::fs::File::create("SAVETEST.sav").unwrap();
+            file.write(&self.prg_ram[..]).unwrap();
+        }
+    }
+    pub fn load(&mut self){
+        if !self.has_battery || !std::fs::exists("SAVETEST.sav").unwrap() {return;}
+        use std::io::Read;
+        let mut file = std::fs::File::open("SAVETEST.sav").unwrap();
+        file.read(&mut self.prg_ram[..]).unwrap();
     }
 }
 
@@ -145,6 +158,7 @@ impl MMC1Cartridge {
             chr_bank_offsets: (0, 0),
         };
         cartridge.reset();
+        cartridge.cart.load();
         cartridge
     }
     fn reset(&mut self) {
@@ -256,7 +270,7 @@ impl Mapper {
                 }
                 _ => 0,
             },
-            _ => 0,
+            
         
         }
     }
@@ -271,6 +285,7 @@ impl Mapper {
             Mapper0(cart) => {
                 if (0x6000..=0x7FFF).contains(&addr) {
                     cart.prg_ram[addr as usize - 0x6000] = val;
+                    
                 }
             } //
             Mapper1(mmc1) => {
@@ -279,6 +294,7 @@ impl Mapper {
                 }
                 if addr >= 0x6000 && addr < 0x8000 {
                     mmc1.cart.prg_ram[addr as usize - 0x6000] = val;
+                    mmc1.cart.save();
                     return;
                 }
 

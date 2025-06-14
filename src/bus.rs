@@ -95,7 +95,8 @@ impl Bus {
             &mut self.irq,
             &mut self.nmi_request,
         );
-
-        ppu.step(mapper, nmi, irq, elapsed_cycles);
+        for _ in 0..elapsed_cycles {
+            ppu.step(mapper, nmi, irq);
+        }
     }
 }

@@ -1,11 +1,93 @@
-use std::{cell::RefCell, rc::Rc};
-
+use std::ops::{BitAndAssign, BitOr};
+use std::{ops::BitAnd, rc::Rc};
+use std::cell::RefCell;
 use sdl2::pixels::Color;
 
-use crate::cartridge::{Mapper, MirrorMode};
+use crate::cartridge::{Mapper,MirrorMode};
 
 pub const SCREEN_WIDTH: usize = 256;
 pub const SCREEN_HEIGHT: usize = 240;
+pub const SCANLINE_DOTS: u32 = 256;
+pub const SCANLINE_END_CYCLE : u32 = 340;
+pub(self) enum PPUPhase {
+    PreRender,
+    Render,
+    PostRender,
+    VBlank
+}
+
+#[repr(u8)]
+pub(self) enum StatusFlags {
+    VBlank = 1 << 7,
+    SpriteZeroHit = 1 << 6,
+    SpriteOverflow = 1 << 5
+}
+#[repr(u8)]
+pub(self) enum ContolFlags {
+    GenerateInterrupt = 0x80,
+    TallSprites = 0x20,
+    BgPage = 0x10,
+    SpritePage = 0x08
+}
+
+#[repr(u8)]
+pub(self) enum MaskFlags {
+    GreyScale = 1,
+    ShowEdgeBG = 2,
+    ShowEdgeSprites = 4,
+    ShowBackground = 8,
+    ShowSprites = 0x10
+}
+
+impl BitAnd<u8> for StatusFlags{
+    type Output = u8;
+    fn bitand(self, rhs: u8) -> Self::Output {
+        self as u8 & rhs
+    }
+}
+impl BitAnd<StatusFlags> for u8 {
+    type Output = u8;
+    fn bitand(self, rhs: StatusFlags) -> Self::Output {
+        self & rhs as u8
+    }
+}
+impl BitOr<StatusFlags> for StatusFlags {
+    type Output = u8;
+    fn bitor(self, rhs: StatusFlags) -> Self::Output {
+        self as u8 | rhs as u8
+    }
+}
+impl BitAndAssign<StatusFlags> for u8 {
+    
+    fn bitand_assign(&mut self, rhs: StatusFlags) {
+        *self &= rhs as u8;
+    }
+}
+impl BitAnd<u8> for MaskFlags{
+    type Output = u8;
+    fn bitand(self, rhs: u8) -> Self::Output {
+        self as u8 & rhs
+    }
+}
+impl BitAnd<MaskFlags> for u8 {
+    type Output = u8;
+    fn bitand(self, rhs: MaskFlags) -> Self::Output {
+        self & rhs as u8
+    }
+}
+impl BitOr<MaskFlags> for MaskFlags {
+    type Output = u8;
+    fn bitor(self, rhs: MaskFlags) -> Self::Output {
+        self as u8 | rhs as u8
+    }
+}
+impl BitAndAssign<MaskFlags> for u8 {
+    
+    fn bitand_assign(&mut self, rhs: MaskFlags) {
+        *self &= rhs as u8;
+    }
+}
+
 
 pub struct PPURegisters {
     pub control: u8,
@@ -67,10 +149,14 @@ pub struct PPU {
     vram: Vec<u8>,
     palette_ram: [u8; 32],
     pub oam_ram: [u8; 256],
+    back_buffer: Box<[Color; SCREEN_HEIGHT * SCREEN_WIDTH]>,
     pub frame_buffer: Box<[Color; SCREEN_HEIGHT * SCREEN_WIDTH]>,
     background_priority: Box<[bool; SCREEN_HEIGHT * SCREEN_WIDTH]>,
     scanline: u32,
     scanline_cycle: u32,
+    current_phase : PPUPhase,
+    even_frame:bool,
+    line_sprites:Vec<u8>
 }
 
 impl PPU {
@@ -80,10 +166,14 @@ impl PPU {
             vram: vec![0; 2048],
             palette_ram: [0; 32],
             oam_ram: [0; 256],
+            back_buffer: Box::new([Color::BLACK; SCREEN_HEIGHT * SCREEN_WIDTH]),
             frame_buffer: Box::new([Color::BLACK; SCREEN_HEIGHT * SCREEN_WIDTH]),
             background_priority: Box::new([false; SCREEN_HEIGHT * SCREEN_WIDTH]),
             scanline: 0,
             scanline_cycle: 0,
+            current_phase:PPUPhase::PreRender,
+            even_frame:true,
+            line_sprites:Vec::with_capacity(8)
         }
     }
     pub fn reset(&mut self) {
@@ -99,139 +189,238 @@ impl PPU {
         &mut self,
         mapper: &mut Mapper,
         nmi: &mut bool,
-        _irq: &mut bool,
-        elapsed_cycles: i32,
-    ) {
-        for _ in 0..elapsed_cycles {
-            let mut registers = self.registers.borrow_mut();
-
-            // PPU Clocking and VRAM address updates
-            let rendering_enabled = (registers.mask & 0x18) != 0;
-
-            // VBLANK Start
-            if self.scanline == 241 && self.scanline_cycle == 1 {
-                registers.status |= 0x80; // Set VBLANK flag
-                if (registers.control & 0x80) != 0 {
-                    *nmi = true;
+        _irq: &mut bool
+    ){
+        use PPUPhase::*;
+        
+        match self.current_phase {
+            PreRender=>{
+                if self.scanline_cycle == 1 {
+                    use StatusFlags::*;
+                    let mut reg = self.registers.borrow_mut();
+                    reg.status &= !(VBlank | SpriteZeroHit);
                 }
-                println!("PPU ENTERING VBLANK");
-            }
-
-            // VBLANK End, clear flags
-            if self.scanline == 261 && self.scanline_cycle == 1 {
-                registers.status &= !0x80; // Clear VBLANK flag
-                registers.status &= !0x40; // Clear sprite zero hit
-                registers.status &= !0x20; // Clear sprite overflow
-            }
-
-            // Rendering period (scanlines 0-239 and pre-render scanline 261)
-            if rendering_enabled && (self.scanline < 240 || self.scanline == 261) {
-                // No longer render visible scanlines at cycle 1
-
-                // Sprite evaluation (cycles 1-64)
-                if self.scanline_cycle >= 1 && self.scanline_cycle <= 64 {
-                    let next_scanline = if self.scanline == 261 { 0 } else { self.scanline + 1 };
-                    let mut sprite_count = 0;
-                    
-                    // Only evaluate sprites for visible scanlines
-                    if next_scanline < 240 {
-                        for i in 0..64 {
-                            let offset = i * 4;
-                            let sprite_y = self.oam_ram[offset];
-                            let tile_height = if (registers.control & 0x20) != 0 { 16 } else { 8 };
-                            
-                            if next_scanline >= sprite_y as u32 && next_scanline < (sprite_y + tile_height) as u32 {
-                                sprite_count += 1;
-                                if sprite_count > 8 {
-                                    registers.status |= 0x20; // Set sprite overflow flag
-                                    break;
-                                }
-                            }
-                        }
-                    }
+                else if self.scanline_cycle == SCANLINE_DOTS + 2 && 
+                    self.get_mask_flag(MaskFlags::ShowBackground) &&
+                    self.get_mask_flag(MaskFlags::ShowSprites) {
+                        let mut reg = self.registers.borrow_mut();
+                        let t = reg.tmp_vram_addr;
+                        reg.vram_addr &= !0x41F;
+                        reg.vram_addr |= t & 0x41F;
                 }
-
-                // Vertical VRAM increment at cycle 256
-                if self.scanline_cycle == 256 {
-                    // Render visible scanlines at cycle 256
-                    
-
-                    // Inlined increment_y logic
-                    if (registers.vram_addr & 0x7000) != 0x7000 {
-                        registers.vram_addr = registers.vram_addr.wrapping_add(0x1000);
-                    } else {
-                        registers.vram_addr &= 0x8FFF;
-                        let y = (registers.vram_addr & 0x03E0) >> 5;
-
-                        let y = match y {
-                            29 => {
-                                registers.vram_addr ^= 0x0800;
-                                0
-                            }
-                            31 => 0,
-                            _ => y.wrapping_add(1),
-                        };
-
-                        registers.vram_addr = (registers.vram_addr & 0xFC1F) | (y << 5);
-                    }
+                else if (281..=304).contains(&self.scanline_cycle) && self.get_mask_flag(MaskFlags::ShowBackground)
+                && self.get_mask_flag(MaskFlags::ShowSprites) {
+                    let mut reg = self.registers.borrow_mut();
+                    let t = reg.tmp_vram_addr;
+                    reg.vram_addr &= !0x7BE0;
+                    reg.vram_addr |= t & 0x7BE0;
                 }
-
-                // Horizontal VRAM copy from tmp_vram_addr at cycle 257
-                if self.scanline_cycle == 257 {
-                    registers.vram_addr = (registers.vram_addr & 0xFBE0) | (registers.tmp_vram_addr & 0x041F);
-                    
-                    // Reset horizontal scroll for scanlines 0-7 (non-scrolling region)
-                    
-                    // Render visible scanlines at cycle 257
-                    
-                }
-
-                // Pre-render scanline specific VRAM copies
-                if self.scanline == 261 {
-                    // Vertical VRAM copy from tmp_vram_addr at cycles 280-304
-                    if self.scanline_cycle >= 280 && self.scanline_cycle <= 304 {
-                        registers.vram_addr = (registers.vram_addr & 0x841F) | (registers.tmp_vram_addr & 0x7BE0);
-                    }
-                    // Horizontal VRAM copy from tmp_vram_addr at cycles 328 and 336
-                    if self.scanline_cycle == 328 || self.scanline_cycle == 336 {
-                        registers.vram_addr = (registers.vram_addr & 0xFBE0) | (registers.tmp_vram_addr & 0x041F);
-                    }
-                }
-            }
-
-            // Increment cycle and scanline
-            self.scanline_cycle += 1;
-
-            // No longer render scanline here
-            if self.scanline_cycle >= 341 {
-                self.scanline_cycle = 0;
-                
-                // No need to render scanline here anymore
-                self.scanline += 1;
-                if self.scanline < 240 {
-                    drop(registers); // Release mutable borrow before calling render_scanline
-                    self.render_scanline(mapper); // Re-borrow after render_scanline
-                }
-                if self.scanline > 261 {
+                else if self.scanline_cycle >= (SCANLINE_END_CYCLE - self.even_frame_adjustment()) {
+                    self.current_phase = Render;
+                    self.scanline_cycle = 0;
                     self.scanline = 0;
                 }
             }
+            Render=>{
+                if self.scanline_cycle > 0 && self.scanline_cycle <= SCANLINE_DOTS {
+                    let vram_addr = self.registers.borrow().vram_addr;
+                    
+                    let x = self.scanline_cycle - 1;
+                    let y = self.scanline;
+                    let screen_coor = y as usize * SCREEN_WIDTH + x as usize;
+
+                    let mut sprite_color = 0;
+                    let mut sprite_palette_idx = 0;
+                    let mut sprite_foreground = false;
+                    
+                    if self.get_mask_flag(MaskFlags::ShowBackground) {
+                        let x_fine = (self.registers.borrow().scroll_x + x as u8) % 8;
+
+                        if self.get_mask_flag(MaskFlags::ShowEdgeBG) || x >= 8 {
+                            let mut addr = 0x2000 | (vram_addr & 0x0FFF);
+                            let tile = self.read(mapper,addr);
+
+                            addr = tile as u16 * 16 + ((vram_addr >> 12) & 0x07);
+                            addr |= self.get_bg_page();
+
+                            let mut bg_color = (self.read(mapper,addr) >> (7 ^ x_fine)) & 1;
+                            bg_color |= ((self.read(mapper,addr + 8) >> (7 ^ x_fine)) & 1) << 1;
+
+                            self.background_priority[screen_coor] = bg_color != 0;
+
+                            addr = 0x23C0 | (vram_addr & 0x0C00) | ((vram_addr >> 4) & 0x38) | ((vram_addr >> 2) & 0x07);
+
+                            let attribute = self.read(mapper,addr);
+                            let shift = (((vram_addr >> 4) & 0x04) | (vram_addr & 0x02)) as u8;
+
+                            let palette_idx = (attribute >> shift) & 0x03;
+                            self.back_buffer[screen_coor] = self.fetch_background_color(bg_color, palette_idx);
+                        }
+                        if x_fine == 7 {
+                            let mut reg = self.registers.borrow_mut();
+                            if (reg.vram_addr & 0x1F) == 31 {
+                                reg.vram_addr &= !0x1F;
+                                reg.vram_addr ^= 0x0400;
+                            }
+                            else {
+                                reg.vram_addr += 1;
+                            }
+                        }
+                    }
+
+                    if self.get_mask_flag(MaskFlags::ShowSprites) && (self.get_mask_flag(MaskFlags::ShowEdgeSprites) || x >= 8) {
+                        for idx in self.line_sprites.iter().map(|item|*item as usize) {
+                            let sprite_x = self.oam_ram[idx * 4 + 3] as u32;
+
+                            if x < sprite_x || x >= (sprite_x + 8) {
+                                continue;
+                            }
+
+                            let (sprite_y,
+                                tile,
+                                attribute) = (
+                                    (self.oam_ram[idx * 4] as u32) + 1,
+                                    self.oam_ram[idx * 4 + 1] as u16,
+                                    self.oam_ram[idx * 4 + 2]
+                                );
+                            
+                            let sprite_height = self.get_sprite_height();
+                            let mut x_shift = (x - sprite_x) % 8;
+                            let mut y_offset = (y - sprite_y) % sprite_height;
+
+                            if (attribute & 0x40) == 0 {
+                                x_shift ^= 7;
+                            }
+                            if (attribute & 0x80) != 0 {
+                                y_offset ^= sprite_height - 1;
+                            }
+                            let mut addr = 0;
+
+                            if sprite_height == 8 {
+                                addr = tile * 16 + y_offset as u16;
+                                addr += self.get_sprite_page();    
+                            }
+                            else {
+                                let tile_offset = if y_offset >= 8 { 1 } else { 0 };
+                                let fine_y = y_offset & 7;
+                                addr = ((tile & 0xFE) as u16 + tile_offset as u16) * 16 + fine_y as u16;
+                                addr |= (tile & 1) << 12;
+                            }
+
+                            sprite_color |= (self.read(mapper,addr) >> x_shift) & 0x01;
+                            sprite_color |= ((self.read(mapper,addr + 8) >> x_shift) & 0x01) << 1;
+
+                            if sprite_color == 0 {
+                                continue;
+                            }
+                            sprite_palette_idx = attribute & 0x03;
+                            sprite_foreground = (attribute & 0x20) == 0;
+
+                            if !self.get_status_flag(StatusFlags::SpriteZeroHit) && self.get_mask_flag(MaskFlags::ShowBackground) && idx == 0
+                            && self.background_priority[screen_coor] && sprite_color != 0 {
+                                let mut reg = self.registers.borrow_mut();
+                                reg.status |= StatusFlags::SpriteZeroHit as u8;
+                            } 
+
+                            break;
+                        }
+                        if !self.background_priority[screen_coor] && sprite_color != 0 || (
+                            self.background_priority[screen_coor] && sprite_color != 0 && sprite_foreground
+                        ) {
+                            self.back_buffer[screen_coor] = self.fetch_sprite_color(sprite_color, sprite_palette_idx);
+                        }
+                        else if !self.background_priority[screen_coor] && sprite_color == 0 {
+                            self.back_buffer[screen_coor] = self.fetch_background_color(0, 0);
+                        }
+                    }
+                }
+                else if self.scanline_cycle == SCANLINE_DOTS + 1 && self.get_mask_flag(MaskFlags::ShowBackground) {
+                    let mut reg = self.registers.borrow_mut();
+                    if (reg.vram_addr & 0x7000) != 0x7000 {
+                        reg.vram_addr += 0x1000;
+                    }
+                    else {
+                        reg.vram_addr &= !0x7000;
+                        let mut y = (reg.vram_addr & 0x03E0) >> 5;
+                        y = if y == 29 {
+                            reg.vram_addr ^= 0x0800;
+                            0
+                        } else if y == 31 { 
+                            0
+                        } else {
+                            y + 1
+                        };
+
+                        reg.vram_addr = (reg.vram_addr & !0x03E0) | (y << 5);
+                    }
+                }
+                else if self.scanline_cycle == SCANLINE_DOTS + 2 && self.get_mask_flag(MaskFlags::ShowBackground) && self.get_mask_flag(MaskFlags::ShowSprites)
+                {
+                    let mut reg = self.registers.borrow_mut();
+                    let t = reg.tmp_vram_addr;
+                    reg.vram_addr &= !0x041F;
+                    reg.vram_addr |= t & 0x41F;
+                }
+
+                if self.scanline_cycle >= SCANLINE_END_CYCLE {
+                    self.line_sprites.clear();
+
+                    let range = self.get_sprite_height() as i32;
+                    let mut j = 0;
+                    let oam_addr = self.registers.borrow().oam_addr;
+                    for i in (oam_addr/4) as usize..64 {
+                        let diff = self.scanline as i32 - self.oam_ram[i * 4] as i32;
+                        if 0 <= diff && diff < range {
+                            if j >= 8 {
+                                let mut reg = self.registers.borrow_mut();
+                                reg.status |= StatusFlags::SpriteOverflow as u8;
+                                break;
+                            }
+                            self.line_sprites.push(i as u8);
+                            j += 1;
+                        }
+                    }
+
+                    self.scanline += 1;
+                    self.scanline_cycle = 0;
+                }
+                if self.scanline >= 240 {
+                    self.current_phase = PostRender;
+                }
+            }
+            PostRender=>{
+                if self.scanline_cycle >= SCANLINE_END_CYCLE {
+                    self.scanline += 1;
+                    self.scanline_cycle = 0;
+                    self.current_phase = VBlank;
+
+                    self.frame_buffer.copy_from_slice(&self.back_buffer[..]);
+                }
+            }
+            VBlank=>{
+                if self.scanline_cycle == 1 && self.scanline == 241 {
+                    let mut reg = self.registers.borrow_mut();
+                    reg.status |= StatusFlags::VBlank as u8;
+
+                    if (reg.control & ContolFlags::GenerateInterrupt as u8) != 0 {
+                        *nmi = true;
+                    }
+                }
+                if self.scanline_cycle >= SCANLINE_END_CYCLE {
+                    self.scanline += 1;
+                    self.scanline_cycle = 0;
+                }
+                if self.scanline >= 261 {
+                    self.current_phase = PreRender;
+                    self.scanline = 0;
+                    self.even_frame = !self.even_frame;
+                }
+            }
         }
+        self.scanline_cycle += 1;
     }
 
-    fn render_scanline(&mut self, mapper: &mut Mapper) {
-        
-        let base_offset = self.scanline as usize * SCREEN_WIDTH;
-        for color in self.frame_buffer[base_offset..base_offset + SCREEN_WIDTH].iter_mut() {
-            *color = Color::RGBA(0, 0, 0, 255);
-        }
-        for prior in self.background_priority[base_offset..base_offset + SCREEN_WIDTH].iter_mut() {
-            *prior = false;
-        }
 
-        self.render_background(mapper);
-        self.render_sprites(mapper);
-    }
     pub fn read(&self, mapper: &Mapper, addr: u16) -> u8 {
         let addr = addr & 0x3FFF;
 
@@ -371,189 +560,7 @@ impl PPU {
             _ => {}
         }
     }
-    fn render_background(&mut self, mapper: &Mapper) {
-        if (self.registers.borrow().mask & 0x08) == 0 {
-            return;
-        }
-
-        let mut current_vram_addr = self.registers.borrow().vram_addr;
-        for tile_num in 0..33 {
-            let coarse_x = current_vram_addr & 0x001F;
-            let coarse_y = (current_vram_addr >> 5) & 0x001F;
-            let name_table = (current_vram_addr >> 10) & 0x0003;
-
-            let base_name_table_addr = 0x2000 + (name_table << 10);
-            let tile_addr = base_name_table_addr + (coarse_y << 5) + coarse_x;
-            let tile_idx = self.read(mapper, tile_addr) as u16;
-
-            let fine_y = (current_vram_addr >> 12) & 0x07;
-
-            let pattern_table = if (self.registers.borrow().control & 0x10) != 0 {
-                0x1000
-            } else {
-                0x0000
-            };
-            let pattern_addr = pattern_table + (tile_idx << 4) + fine_y;
-
-            let plane0 = self.read(mapper, pattern_addr);
-            let plane1 = self.read(mapper, pattern_addr.wrapping_add(8));
-
-            let attribute_x = coarse_x >> 2;
-            let attribute_y = coarse_y >> 2;
-            let attribute_addr = base_name_table_addr
-                .wrapping_add(0x3C0)
-                .wrapping_add(attribute_y << 3)
-                .wrapping_add(attribute_x);
-            let attribute_byte = self.read(mapper, attribute_addr);
-
-            let attribute_shift = ((coarse_y & 0x02) << 1) | (coarse_x & 0x02);
-            let palette_idx = (attribute_byte >> attribute_shift) & 0x03;
-
-            // Get fine_x, but set to 0 for scanlines 0-7 (non-scrolling region)
-            let current_fine_x = if self.scanline < 8 {
-                0
-            } else {
-                self.registers.borrow().fine_x as i32
-            };
-
-            for i in 0..8 {
-                let pixel_x_on_screen = (tile_num as i32 * 8) + i as i32 - current_fine_x;
-
-                // Apply background leftmost 8-pixel mask
-                if pixel_x_on_screen < 8 && (self.registers.borrow().mask & 0x02) == 0 {
-                    continue;
-                }
-
-                if pixel_x_on_screen < 0 || pixel_x_on_screen >= SCREEN_WIDTH as i32 {
-                    continue;
-                }
-
-                let bit_idx = 7 - i as u8;
-                let bit0 = (plane0 >> bit_idx) & 1;
-                let bit1 = (plane1 >> bit_idx) & 1;
-                let color_idx = bit0 | (bit1 << 1);
-
-                let screen_coor = (self.scanline as i32 * (SCREEN_WIDTH as i32) + pixel_x_on_screen) as usize;
-                if color_idx != 0 {
-                    self.background_priority[screen_coor] = true;
-                }
-
-                self.frame_buffer[screen_coor] =
-                    self.fetch_background_color(color_idx, palette_idx);
-            }
-            // Inlined increment_x logic
-            if (current_vram_addr & 0x001F) == 31 {
-                current_vram_addr &= 0xFFE0;
-                current_vram_addr ^= 0x0400; // Toggle nametable X
-            } else {
-                current_vram_addr += 1; // Increment coarse X
-            }
-        }
-    }
-
-    fn render_sprites(&mut self, mapper: &Mapper) {
-        if (self.registers.borrow_mut().mask & 0x10) == 0 {
-            return;
-        }
-
-        let mut pixel_drawn = vec![false; SCREEN_WIDTH];
-        let mut scanline_sprites = 0;
-        for i in 0..64 {
-            let offset = i * 4;
-            let (sprite_y, tile_idx, attributes, sprite_x) = (
-                self.oam_ram[offset],
-                self.oam_ram[offset + 1],
-                self.oam_ram[offset + 2],
-                self.oam_ram[offset + 3],
-            );
-
-            let palette_idx = attributes & 0x03;
-            let flip_x = (attributes & 0x40) != 0;
-            let flip_y = (attributes & 0x80) != 0;
-            let priority = (attributes & 0x20) == 0;
-
-            let is_8x16 = (self.registers.borrow().control & 0x20) != 0;
-
-            let tile_height = if is_8x16 { 16 } else { 8 };
-
-            if self.scanline < sprite_y as u32 || self.scanline >= (sprite_y + tile_height) as u32 {
-                continue;
-            }
-
-            let sub_y = if flip_y {
-                tile_height - 1 - (self.scanline as u8 - sprite_y)
-            } else {
-                self.scanline as u8 - sprite_y
-            };
-
-            let subtile_idx = if is_8x16 {
-                (tile_idx & 0xFE) + (sub_y / 8)
-            } else {
-                tile_idx
-            } as u16;
-
-            let pattern_table = match is_8x16 {
-                true => {
-                    if (tile_idx & 1) != 0 {
-                        0x1000
-                    } else {
-                        0x0000
-                    }
-                }
-                false => {
-                    if (self.registers.borrow().control & 0x08) != 0 {
-                        0x1000
-                    } else {
-                        0x0000
-                    }
-                }
-            };
-            let base_addr = pattern_table + (subtile_idx << 4);
-
-            let plane0 = self.read(mapper, base_addr + (sub_y % 8) as u16);
-            let plane1 = self.read(mapper, base_addr + (sub_y as u16 % 8) + 8);
-
-            for bit in 0..8 {
-                let shift = if flip_x { bit } else { 7 - bit };
-
-                let bit0 = (plane0 >> shift) & 1;
-                let bit1 = (plane1 >> shift) & 1;
-
-                let color = bit0 | (bit1 << 1);
-
-                if color == 0 {
-                    continue;
-                }
-
-                let pixel_x = sprite_x as usize + bit as usize;
-
-                // Apply sprite leftmost 8-pixel mask
-                if pixel_x < 8 && (self.registers.borrow().mask & 0x04) == 0 {
-                    continue;
-                }
-
-                if pixel_x >= SCREEN_WIDTH {
-                    continue;
-                }
-                let idx = self.scanline as usize * SCREEN_WIDTH + pixel_x;
-                if i == 0 && self.background_priority[idx] && color != 0 {
-                    self.registers.borrow_mut().status |= 0x40;
-                }
-
-                if pixel_drawn[pixel_x] {
-                    continue;
-                }
-
-                if !priority && self.background_priority[idx] {
-                    continue;
-                }
-                scanline_sprites += 1;
-                self.frame_buffer[idx] = self.fetch_sprite_color(color, palette_idx);
-                pixel_drawn[pixel_x] = true;
-            }
-        }
-    }
-
+    
     fn fetch_background_color(&self, color_idx: u8, palette_idx: u8) -> Color {
         if color_idx == 0 {
             let bg_color_idx = self.palette_ram[0] as usize;
@@ -583,6 +590,41 @@ impl PPU {
             Horizontal => ((nt_idx / 2) * 0x400 + inner_offset) as u16,
             SingleScreenA => inner_offset as u16,
             SingleScreenB => (0x400 + inner_offset) as u16,
+        }
+    }
+    fn get_status_flag(&self,flag:StatusFlags)->bool {
+        (self.registers.borrow().status & flag) != 0
+    }
+    fn get_mask_flag(&self, flag : MaskFlags) -> bool {
+        (self.registers.borrow().mask & flag) != 0
+    }
+    fn even_frame_adjustment(&self)->u32 {
+        if !self.even_frame && self.get_mask_flag(MaskFlags::ShowBackground) && self.get_mask_flag(MaskFlags::ShowSprites){
+            1
+        } else {
+            0
+        }
+    }
+    fn get_bg_page(&self) -> u16 {
+        if self.registers.borrow().control & 0x10 == 0 {
+            0
+        } else {
+            1 << 12
+        }
+    }
+    fn get_sprite_page(&self)->u16 {
+        if self.registers.borrow().control & 0x08 != 0 {
+            0x1000
+        }
+        else {
+            0
+        }
+    }
+    fn get_sprite_height(&self)->u32 {
+        if self.registers.borrow().control & 0x20 != 0 {
+            16
+        } else {
+            8
         }
     }
 }

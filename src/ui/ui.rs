@@ -7,7 +7,6 @@ use sdl2::{
     event::Event,
     keyboard::Mod,
     pixels::{Color, PixelFormatEnum},
-    rect::Rect,
     render::{Canvas, Texture, TextureCreator},
     video::{Window, WindowContext},
 };
@@ -166,9 +165,8 @@ impl<'a> RnesUI<'a> {
                 _ => {}
             }
         }
-        self.event_send
-            .send(UiEvent::ControllerInput(self.nes_input_state))
-            .unwrap();
+        let _ = self.event_send
+            .send(UiEvent::ControllerInput(self.nes_input_state));
         true
     }
     fn render_nes_framebuffer(&mut self, framebuffer: &[Color]) {

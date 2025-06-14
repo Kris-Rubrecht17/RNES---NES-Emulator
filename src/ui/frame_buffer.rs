@@ -1,10 +1,6 @@
 use std::{
     cell::UnsafeCell,
-    ops::Index,
-    sync::{
-        Arc,
-        atomic::{AtomicUsize, Ordering},
-    },
+    sync::atomic::{AtomicUsize, Ordering},
 };
 
 use sdl2::pixels::Color;

@@ -1,13 +1,12 @@
 use std::sync::Arc;
 
-use crossbeam_channel::{Receiver, Sender};
+use crossbeam_channel::Receiver;
 
-use sdl2::pixels::Color;
+
 
 use crate::{
     cartridge::{Cartridge, Mapper},
     cpu::CPU,
-    ppu::{SCREEN_HEIGHT, SCREEN_WIDTH},
     ui::frame_buffer::DoubleBuffer,
 };
 
@@ -89,8 +88,7 @@ impl Emulator {
             while cycles < 29781 {
                 let new_cycles = self.cpu.execute_instruction();
                 self.cpu.bus.tick_ppu(new_cycles * 3);
-                cycles += new_cycles + self.cpu.bus.extra_cycles;
-                self.cpu.bus.extra_cycles = 0;
+                cycles += new_cycles;
             }
             let should_send_framebuffer = self.fps_multiplier <= 1.0
                 || self.fps_counter % (self.fps_multiplier.round() as u32) == 0;
