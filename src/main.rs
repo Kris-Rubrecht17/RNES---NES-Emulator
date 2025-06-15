@@ -34,7 +34,8 @@ fn main() {
     let sdl2 = sdl2::init().unwrap();
     let video = sdl2.video().unwrap();
     let canvas = video
-        .window("RNES", 1280, 720)
+        .window("RNES", 1920 / 2, 1080)
+        .resizable()
         .build()
         .unwrap()
         .into_canvas()
@@ -43,7 +44,7 @@ fn main() {
 
     let texture_creator = canvas.texture_creator();
 
-    let mut ui = RnesUI::new(1280, 720, sx2, canvas, &texture_creator, buf2);
+    let mut ui = RnesUI::new(1920 / 2, 1080, sx2, canvas, &texture_creator, buf2);
 
     ui.run();
     emu_thread.join().unwrap();

@@ -2,8 +2,6 @@ use std::sync::Arc;
 
 use crossbeam_channel::Receiver;
 
-
-
 use crate::{
     cartridge::{Cartridge, Mapper},
     cpu::CPU,
@@ -67,6 +65,9 @@ impl Emulator {
                     }
                     UiEvent::LoadCart(file_path) => {
                         self.load_cartridge(file_path);
+                    }
+                    UiEvent::EnableCheats => {
+                        self.cpu.bus.cheats = !self.cpu.bus.cheats;
                     }
                 }
             }

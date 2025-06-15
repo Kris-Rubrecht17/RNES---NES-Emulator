@@ -244,8 +244,7 @@ impl CPU {
             self.bus.extra_cycles -= 1;
             return 1;
         }
-        
-        
+
         if self.bus.nmi_request {
             self.bus.nmi_request = false;
             return self.nmi();
@@ -471,10 +470,10 @@ impl CPU {
             0x5A => self.nop(),
             0x7A => self.nop(),
             0xDA => self.nop(),
-            0xFA=>self.nop(),
+            0xFA => self.nop(),
             0x89 => self.multibyte_nop(AddressMode::Immediate, 2),
-            0x80 =>self.multibyte_nop(AddressMode::Immediate, 2),
-            0x82=>self.multibyte_nop(AddressMode::Immediate, 2),
+            0x80 => self.multibyte_nop(AddressMode::Immediate, 2),
+            0x82 => self.multibyte_nop(AddressMode::Immediate, 2),
             0xC2 => self.multibyte_nop(AddressMode::Immediate, 2),
             0xE2 => self.multibyte_nop(AddressMode::Immediate, 2),
             //unofficial sbc
@@ -531,8 +530,8 @@ impl CPU {
                 println!("Illegal Halt!!!!!!");
                 0
             }
-            0x0B=>self.aac(),
-            0x2B=>self.aac(),
+            0x0B => self.aac(),
+            0x2B => self.aac(),
             _ => unreachable!("Undocumented opcode reached: 0x{opcode:02X}"),
         }
     }
@@ -1273,14 +1272,12 @@ impl CPU {
 
         7
     }
-    fn aac(&mut self)->i32 {
-        
-        self.a &= if self.get_flag(Self::FLAG_C) {0x01} else {0};
-        self.set_flag(Self::FLAG_C,(self.a & 0x01) != 0);
+    fn aac(&mut self) -> i32 {
+        self.a &= if self.get_flag(Self::FLAG_C) { 0x01 } else { 0 };
+        self.set_flag(Self::FLAG_C, (self.a & 0x01) != 0);
 
         self.set_zn(self.a);
 
         2
     }
-    
 }

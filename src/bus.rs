@@ -12,6 +12,7 @@ pub struct Bus {
     pub irq: bool,
     pub nmi_request: bool,
     pub extra_cycles: i32,
+    pub cheats: bool,
 }
 
 impl Bus {
@@ -24,6 +25,7 @@ impl Bus {
             nmi_request: false,
             ppu: PPU::new(),
             extra_cycles: 0,
+            cheats: false,
         }
     }
     pub fn load_cartridge(&mut self, cartridge: Mapper) {

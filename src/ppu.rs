@@ -1,33 +1,33 @@
+use sdl2::pixels::Color;
+use std::cell::RefCell;
 use std::ops::{BitAndAssign, BitOr};
 use std::{ops::BitAnd, rc::Rc};
-use std::cell::RefCell;
-use sdl2::pixels::Color;
 
-use crate::cartridge::{Mapper,MirrorMode};
+use crate::cartridge::{Mapper, MirrorMode};
 
 pub const SCREEN_WIDTH: usize = 256;
 pub const SCREEN_HEIGHT: usize = 240;
 pub const SCANLINE_DOTS: u32 = 256;
-pub const SCANLINE_END_CYCLE : u32 = 340;
+pub const SCANLINE_END_CYCLE: u32 = 340;
 pub(self) enum PPUPhase {
     PreRender,
     Render,
     PostRender,
-    VBlank
+    VBlank,
 }
 
 #[repr(u8)]
 pub(self) enum StatusFlags {
     VBlank = 1 << 7,
     SpriteZeroHit = 1 << 6,
-    SpriteOverflow = 1 << 5
+    SpriteOverflow = 1 << 5,
 }
 #[repr(u8)]
 pub(self) enum ContolFlags {
     GenerateInterrupt = 0x80,
     TallSprites = 0x20,
     BgPage = 0x10,
-    SpritePage = 0x08
+    SpritePage = 0x08,
 }
 
 #[repr(u8)]
@@ -36,10 +36,10 @@ pub(self) enum MaskFlags {
     ShowEdgeBG = 2,
     ShowEdgeSprites = 4,
     ShowBackground = 8,
-    ShowSprites = 0x10
+    ShowSprites = 0x10,
 }
 
-impl BitAnd<u8> for StatusFlags{
+impl BitAnd<u8> for StatusFlags {
     type Output = u8;
     fn bitand(self, rhs: u8) -> Self::Output {
         self as u8 & rhs
@@ -58,12 +58,11 @@ impl BitOr<StatusFlags> for StatusFlags {
     }
 }
 impl BitAndAssign<StatusFlags> for u8 {
-    
     fn bitand_assign(&mut self, rhs: StatusFlags) {
         *self &= rhs as u8;
     }
 }
-impl BitAnd<u8> for MaskFlags{
+impl BitAnd<u8> for MaskFlags {
     type Output = u8;
     fn bitand(self, rhs: u8) -> Self::Output {
         self as u8 & rhs
@@ -82,12 +81,10 @@ impl BitOr<MaskFlags> for MaskFlags {
     }
 }
 impl BitAndAssign<MaskFlags> for u8 {
-    
     fn bitand_assign(&mut self, rhs: MaskFlags) {
         *self &= rhs as u8;
     }
 }
-
 
 pub struct PPURegisters {
     pub control: u8,
@@ -135,7 +132,7 @@ impl PPURegisters {
         self.ppu_data = 0;
         self.scroll_x = 0;
         self.scroll_y = 0;
-        self.address_latch =false;
+        self.address_latch = false;
         self.fine_x = 0;
         self.vram_addr = 0;
         self.tmp_vram_addr = 0;
@@ -154,9 +151,9 @@ pub struct PPU {
     background_priority: Box<[bool; SCREEN_HEIGHT * SCREEN_WIDTH]>,
     scanline: u32,
     scanline_cycle: u32,
-    current_phase : PPUPhase,
-    even_frame:bool,
-    line_sprites:Vec<u8>
+    current_phase: PPUPhase,
+    even_frame: bool,
+    line_sprites: Vec<u8>,
 }
 
 impl PPU {
@@ -171,9 +168,9 @@ impl PPU {
             background_priority: Box::new([false; SCREEN_HEIGHT * SCREEN_WIDTH]),
             scanline: 0,
             scanline_cycle: 0,
-            current_phase:PPUPhase::PreRender,
-            even_frame:true,
-            line_sprites:Vec::with_capacity(8)
+            current_phase: PPUPhase::PreRender,
+            even_frame: true,
+            line_sprites: Vec::with_capacity(8),
         }
     }
     pub fn reset(&mut self) {
@@ -185,46 +182,42 @@ impl PPU {
         self.scanline = 0;
         self.scanline_cycle = 0;
     }
-    pub fn step(
-        &mut self,
-        mapper: &mut Mapper,
-        nmi: &mut bool,
-        _irq: &mut bool
-    ){
+    pub fn step(&mut self, mapper: &mut Mapper, nmi: &mut bool, _irq: &mut bool) {
         use PPUPhase::*;
-        
+
         match self.current_phase {
-            PreRender=>{
+            PreRender => {
                 if self.scanline_cycle == 1 {
                     use StatusFlags::*;
                     let mut reg = self.registers.borrow_mut();
                     reg.status &= !(VBlank | SpriteZeroHit);
-                }
-                else if self.scanline_cycle == SCANLINE_DOTS + 2 && 
-                    self.get_mask_flag(MaskFlags::ShowBackground) &&
-                    self.get_mask_flag(MaskFlags::ShowSprites) {
-                        let mut reg = self.registers.borrow_mut();
-                        let t = reg.tmp_vram_addr;
-                        reg.vram_addr &= !0x41F;
-                        reg.vram_addr |= t & 0x41F;
-                }
-                else if (281..=304).contains(&self.scanline_cycle) && self.get_mask_flag(MaskFlags::ShowBackground)
-                && self.get_mask_flag(MaskFlags::ShowSprites) {
+                } else if self.scanline_cycle == SCANLINE_DOTS + 2
+                    && self.get_mask_flag(MaskFlags::ShowBackground)
+                    && self.get_mask_flag(MaskFlags::ShowSprites)
+                {
+                    let mut reg = self.registers.borrow_mut();
+                    let t = reg.tmp_vram_addr;
+                    reg.vram_addr &= !0x41F;
+                    reg.vram_addr |= t & 0x41F;
+                } else if (281..=304).contains(&self.scanline_cycle)
+                    && self.get_mask_flag(MaskFlags::ShowBackground)
+                    && self.get_mask_flag(MaskFlags::ShowSprites)
+                {
                     let mut reg = self.registers.borrow_mut();
                     let t = reg.tmp_vram_addr;
                     reg.vram_addr &= !0x7BE0;
                     reg.vram_addr |= t & 0x7BE0;
-                }
-                else if self.scanline_cycle >= (SCANLINE_END_CYCLE - self.even_frame_adjustment()) {
+                } else if self.scanline_cycle >= (SCANLINE_END_CYCLE - self.even_frame_adjustment())
+                {
                     self.current_phase = Render;
                     self.scanline_cycle = 0;
                     self.scanline = 0;
                 }
             }
-            Render=>{
+            Render => {
                 if self.scanline_cycle > 0 && self.scanline_cycle <= SCANLINE_DOTS {
                     let vram_addr = self.registers.borrow().vram_addr;
-                    
+
                     let x = self.scanline_cycle - 1;
                     let y = self.scanline;
                     let screen_coor = y as usize * SCREEN_WIDTH + x as usize;
@@ -232,58 +225,61 @@ impl PPU {
                     let mut sprite_color = 0;
                     let mut sprite_palette_idx = 0;
                     let mut sprite_foreground = false;
-                    
+
                     if self.get_mask_flag(MaskFlags::ShowBackground) {
                         let x_fine = (self.registers.borrow().scroll_x + x as u8) % 8;
 
                         if self.get_mask_flag(MaskFlags::ShowEdgeBG) || x >= 8 {
                             let mut addr = 0x2000 | (vram_addr & 0x0FFF);
-                            let tile = self.read(mapper,addr);
+                            let tile = self.read(mapper, addr);
 
                             addr = tile as u16 * 16 + ((vram_addr >> 12) & 0x07);
                             addr |= self.get_bg_page();
 
-                            let mut bg_color = (self.read(mapper,addr) >> (7 ^ x_fine)) & 1;
-                            bg_color |= ((self.read(mapper,addr + 8) >> (7 ^ x_fine)) & 1) << 1;
+                            let mut bg_color = (self.read(mapper, addr) >> (7 ^ x_fine)) & 1;
+                            bg_color |= ((self.read(mapper, addr + 8) >> (7 ^ x_fine)) & 1) << 1;
 
                             self.background_priority[screen_coor] = bg_color != 0;
 
-                            addr = 0x23C0 | (vram_addr & 0x0C00) | ((vram_addr >> 4) & 0x38) | ((vram_addr >> 2) & 0x07);
+                            addr = 0x23C0
+                                | (vram_addr & 0x0C00)
+                                | ((vram_addr >> 4) & 0x38)
+                                | ((vram_addr >> 2) & 0x07);
 
-                            let attribute = self.read(mapper,addr);
+                            let attribute = self.read(mapper, addr);
                             let shift = (((vram_addr >> 4) & 0x04) | (vram_addr & 0x02)) as u8;
 
                             let palette_idx = (attribute >> shift) & 0x03;
-                            self.back_buffer[screen_coor] = self.fetch_background_color(bg_color, palette_idx);
+                            self.back_buffer[screen_coor] =
+                                self.fetch_background_color(bg_color, palette_idx);
                         }
                         if x_fine == 7 {
                             let mut reg = self.registers.borrow_mut();
                             if (reg.vram_addr & 0x1F) == 31 {
                                 reg.vram_addr &= !0x1F;
                                 reg.vram_addr ^= 0x0400;
-                            }
-                            else {
+                            } else {
                                 reg.vram_addr += 1;
                             }
                         }
                     }
 
-                    if self.get_mask_flag(MaskFlags::ShowSprites) && (self.get_mask_flag(MaskFlags::ShowEdgeSprites) || x >= 8) {
-                        for idx in self.line_sprites.iter().map(|item|*item as usize) {
+                    if self.get_mask_flag(MaskFlags::ShowSprites)
+                        && (self.get_mask_flag(MaskFlags::ShowEdgeSprites) || x >= 8)
+                    {
+                        for idx in self.line_sprites.iter().map(|item| *item as usize) {
                             let sprite_x = self.oam_ram[idx * 4 + 3] as u32;
 
                             if x < sprite_x || x >= (sprite_x + 8) {
                                 continue;
                             }
 
-                            let (sprite_y,
-                                tile,
-                                attribute) = (
-                                    (self.oam_ram[idx * 4] as u32) + 1,
-                                    self.oam_ram[idx * 4 + 1] as u16,
-                                    self.oam_ram[idx * 4 + 2]
-                                );
-                            
+                            let (sprite_y, tile, attribute) = (
+                                (self.oam_ram[idx * 4] as u32) + 1,
+                                self.oam_ram[idx * 4 + 1] as u16,
+                                self.oam_ram[idx * 4 + 2],
+                            );
+
                             let sprite_height = self.get_sprite_height();
                             let mut x_shift = (x - sprite_x) % 8;
                             let mut y_offset = (y - sprite_y) % sprite_height;
@@ -294,21 +290,21 @@ impl PPU {
                             if (attribute & 0x80) != 0 {
                                 y_offset ^= sprite_height - 1;
                             }
-                            let mut addr = 0;
+                            let mut addr;
 
                             if sprite_height == 8 {
                                 addr = tile * 16 + y_offset as u16;
-                                addr += self.get_sprite_page();    
-                            }
-                            else {
+                                addr += self.get_sprite_page();
+                            } else {
                                 let tile_offset = if y_offset >= 8 { 1 } else { 0 };
                                 let fine_y = y_offset & 7;
-                                addr = ((tile & 0xFE) as u16 + tile_offset as u16) * 16 + fine_y as u16;
+                                addr = ((tile & 0xFE) as u16 + tile_offset as u16) * 16
+                                    + fine_y as u16;
                                 addr |= (tile & 1) << 12;
                             }
 
-                            sprite_color |= (self.read(mapper,addr) >> x_shift) & 0x01;
-                            sprite_color |= ((self.read(mapper,addr + 8) >> x_shift) & 0x01) << 1;
+                            sprite_color |= (self.read(mapper, addr) >> x_shift) & 0x01;
+                            sprite_color |= ((self.read(mapper, addr + 8) >> x_shift) & 0x01) << 1;
 
                             if sprite_color == 0 {
                                 continue;
@@ -316,36 +312,42 @@ impl PPU {
                             sprite_palette_idx = attribute & 0x03;
                             sprite_foreground = (attribute & 0x20) == 0;
 
-                            if !self.get_status_flag(StatusFlags::SpriteZeroHit) && self.get_mask_flag(MaskFlags::ShowBackground) && idx == 0
-                            && self.background_priority[screen_coor] && sprite_color != 0 {
+                            if !self.get_status_flag(StatusFlags::SpriteZeroHit)
+                                && self.get_mask_flag(MaskFlags::ShowBackground)
+                                && idx == 0
+                                && self.background_priority[screen_coor]
+                                && sprite_color != 0
+                            {
                                 let mut reg = self.registers.borrow_mut();
                                 reg.status |= StatusFlags::SpriteZeroHit as u8;
-                            } 
+                            }
 
                             break;
                         }
-                        if !self.background_priority[screen_coor] && sprite_color != 0 || (
-                            self.background_priority[screen_coor] && sprite_color != 0 && sprite_foreground
-                        ) {
-                            self.back_buffer[screen_coor] = self.fetch_sprite_color(sprite_color, sprite_palette_idx);
-                        }
-                        else if !self.background_priority[screen_coor] && sprite_color == 0 {
+                        if !self.background_priority[screen_coor] && sprite_color != 0
+                            || (self.background_priority[screen_coor]
+                                && sprite_color != 0
+                                && sprite_foreground)
+                        {
+                            self.back_buffer[screen_coor] =
+                                self.fetch_sprite_color(sprite_color, sprite_palette_idx);
+                        } else if !self.background_priority[screen_coor] && sprite_color == 0 {
                             self.back_buffer[screen_coor] = self.fetch_background_color(0, 0);
                         }
                     }
-                }
-                else if self.scanline_cycle == SCANLINE_DOTS + 1 && self.get_mask_flag(MaskFlags::ShowBackground) {
+                } else if self.scanline_cycle == SCANLINE_DOTS + 1
+                    && self.get_mask_flag(MaskFlags::ShowBackground)
+                {
                     let mut reg = self.registers.borrow_mut();
                     if (reg.vram_addr & 0x7000) != 0x7000 {
                         reg.vram_addr += 0x1000;
-                    }
-                    else {
+                    } else {
                         reg.vram_addr &= !0x7000;
                         let mut y = (reg.vram_addr & 0x03E0) >> 5;
                         y = if y == 29 {
                             reg.vram_addr ^= 0x0800;
                             0
-                        } else if y == 31 { 
+                        } else if y == 31 {
                             0
                         } else {
                             y + 1
@@ -353,8 +355,9 @@ impl PPU {
 
                         reg.vram_addr = (reg.vram_addr & !0x03E0) | (y << 5);
                     }
-                }
-                else if self.scanline_cycle == SCANLINE_DOTS + 2 && self.get_mask_flag(MaskFlags::ShowBackground) && self.get_mask_flag(MaskFlags::ShowSprites)
+                } else if self.scanline_cycle == SCANLINE_DOTS + 2
+                    && self.get_mask_flag(MaskFlags::ShowBackground)
+                    && self.get_mask_flag(MaskFlags::ShowSprites)
                 {
                     let mut reg = self.registers.borrow_mut();
                     let t = reg.tmp_vram_addr;
@@ -368,7 +371,7 @@ impl PPU {
                     let range = self.get_sprite_height() as i32;
                     let mut j = 0;
                     let oam_addr = self.registers.borrow().oam_addr;
-                    for i in (oam_addr/4) as usize..64 {
+                    for i in (oam_addr / 4) as usize..64 {
                         let diff = self.scanline as i32 - self.oam_ram[i * 4] as i32;
                         if 0 <= diff && diff < range {
                             if j >= 8 {
@@ -388,7 +391,7 @@ impl PPU {
                     self.current_phase = PostRender;
                 }
             }
-            PostRender=>{
+            PostRender => {
                 if self.scanline_cycle >= SCANLINE_END_CYCLE {
                     self.scanline += 1;
                     self.scanline_cycle = 0;
@@ -397,7 +400,7 @@ impl PPU {
                     self.frame_buffer.copy_from_slice(&self.back_buffer[..]);
                 }
             }
-            VBlank=>{
+            VBlank => {
                 if self.scanline_cycle == 1 && self.scanline == 241 {
                     let mut reg = self.registers.borrow_mut();
                     reg.status |= StatusFlags::VBlank as u8;
@@ -419,7 +422,6 @@ impl PPU {
         }
         self.scanline_cycle += 1;
     }
-
 
     pub fn read(&self, mapper: &Mapper, addr: u16) -> u8 {
         let addr = addr & 0x3FFF;
@@ -560,7 +562,7 @@ impl PPU {
             _ => {}
         }
     }
-    
+
     fn fetch_background_color(&self, color_idx: u8, palette_idx: u8) -> Color {
         if color_idx == 0 {
             let bg_color_idx = self.palette_ram[0] as usize;
@@ -592,14 +594,17 @@ impl PPU {
             SingleScreenB => (0x400 + inner_offset) as u16,
         }
     }
-    fn get_status_flag(&self,flag:StatusFlags)->bool {
+    fn get_status_flag(&self, flag: StatusFlags) -> bool {
         (self.registers.borrow().status & flag) != 0
     }
-    fn get_mask_flag(&self, flag : MaskFlags) -> bool {
+    fn get_mask_flag(&self, flag: MaskFlags) -> bool {
         (self.registers.borrow().mask & flag) != 0
     }
-    fn even_frame_adjustment(&self)->u32 {
-        if !self.even_frame && self.get_mask_flag(MaskFlags::ShowBackground) && self.get_mask_flag(MaskFlags::ShowSprites){
+    fn even_frame_adjustment(&self) -> u32 {
+        if !self.even_frame
+            && self.get_mask_flag(MaskFlags::ShowBackground)
+            && self.get_mask_flag(MaskFlags::ShowSprites)
+        {
             1
         } else {
             0
@@ -612,15 +617,14 @@ impl PPU {
             1 << 12
         }
     }
-    fn get_sprite_page(&self)->u16 {
+    fn get_sprite_page(&self) -> u16 {
         if self.registers.borrow().control & 0x08 != 0 {
             0x1000
-        }
-        else {
+        } else {
             0
         }
     }
-    fn get_sprite_height(&self)->u32 {
+    fn get_sprite_height(&self) -> u32 {
         if self.registers.borrow().control & 0x20 != 0 {
             16
         } else {

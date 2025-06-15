@@ -64,7 +64,7 @@ impl Cartridge {
     pub fn from_bytes(rom_data: Vec<u8>) -> Self {
         let prg_banks = rom_data[4] as i32;
         let chr_banks = rom_data[5] as i32;
-        
+
         let flag6 = rom_data[6];
         let flag7 = rom_data[7];
 
@@ -81,13 +81,13 @@ impl Cartridge {
 
         let prg_size = prg_banks * 16 * 1024;
         let chr_size = chr_banks * 8 * 1024;
-        
+
         //let has_trainer = (flag6 &
         let mut offset = 16;
         let has_trainer = (flag6 & 0x04) != 0;
-if has_trainer {
-    offset += 512; // Skip the trainer data if present
-}
+        if has_trainer {
+            offset += 512; // Skip the trainer data if present
+        }
         let prg_rom = rom_data[offset..offset + prg_size as usize].to_vec();
 
         offset += prg_size as usize;
@@ -117,18 +117,21 @@ if has_trainer {
         self.mirror_vert = mode == MirrorMode::Vertical;
         self.mirror_horz = mode == MirrorMode::Horizontal;
     }
-    pub fn save(&self){
+    pub fn save(&self) {
         if self.has_battery {
             use std::io::Write;
             let mut file = std::fs::File::create("SAVETEST.sav").unwrap();
             file.write(&self.prg_ram[..]).unwrap();
         }
     }
-    pub fn load(&mut self){
-        if !self.has_battery || !std::fs::exists("SAVETEST.sav").unwrap() {return;}
+    pub fn load(&mut self) {
+        if !self.has_battery || !std::fs::exists("SAVETEST.sav").unwrap() {
+            return;
+        }
         use std::io::Read;
         let mut file = std::fs::File::open("SAVETEST.sav").unwrap();
         file.read(&mut self.prg_ram[..]).unwrap();
+        self.prg_ram[0x0658] = 0xFF;
     }
 }
 
@@ -193,7 +196,10 @@ impl MMC1Cartridge {
                 self.chr_bank_offsets = (bank as i32 * 0x1000, (bank as i32 + 1) * 0x1000);
             } else {
                 // 4KB mode
-                self.chr_bank_offsets = (self.chr_banks.0 as i32 * 0x1000, self.chr_banks.1 as i32 * 0x1000);
+                self.chr_bank_offsets = (
+                    self.chr_banks.0 as i32 * 0x1000,
+                    self.chr_banks.1 as i32 * 0x1000,
+                );
             }
         }
 
@@ -209,17 +215,21 @@ impl MMC1Cartridge {
             }
             2 => {
                 // First bank fixed to last bank, second bank switchable
-                self.prg_bank_offsets = ((prg_bank_count - 1) * 0x4000, (self.prg_bank as i32 % prg_bank_count) * 0x4000);
+                self.prg_bank_offsets = (
+                    (prg_bank_count - 1) * 0x4000,
+                    (self.prg_bank as i32 % prg_bank_count) * 0x4000,
+                );
             }
             3 => {
                 // First bank switchable, second bank fixed to last bank
-                self.prg_bank_offsets = ((self.prg_bank as i32 % prg_bank_count) * 0x4000, (prg_bank_count - 1) * 0x4000);
+                self.prg_bank_offsets = (
+                    (self.prg_bank as i32 % prg_bank_count) * 0x4000,
+                    (prg_bank_count - 1) * 0x4000,
+                );
             }
             _ => unreachable!(),
         }
     }
-    
-    
 }
 
 #[derive(Clone, Debug)]
@@ -231,7 +241,6 @@ pub enum Mapper {
 unsafe impl Send for Mapper {}
 impl Mapper {
     pub fn with_cart(cart: Cartridge) -> Self {
-        
         match cart.mapper_id {
             0 => Self::Mapper0(cart),
             1 => Self::Mapper1(MMC1Cartridge::with_cartridge(cart)),
@@ -270,8 +279,6 @@ impl Mapper {
                 }
                 _ => 0,
             },
-            
-        
         }
     }
 
@@ -285,7 +292,6 @@ impl Mapper {
             Mapper0(cart) => {
                 if (0x6000..=0x7FFF).contains(&addr) {
                     cart.prg_ram[addr as usize - 0x6000] = val;
-                    
                 }
             } //
             Mapper1(mmc1) => {
@@ -300,7 +306,6 @@ impl Mapper {
 
                 // Only $8000-$FFFF writes reach here
                 if (val & 0x80) != 0 {
-                    
                     mmc1.shift_reg = 0x10;
                     mmc1.control |= 0x0C;
                     mmc1.shift_count = 0;
@@ -317,20 +322,17 @@ impl Mapper {
                     match reg {
                         0 => {
                             mmc1.control = mmc1.shift_reg & 0x1F;
-                            
+
                             mmc1.apply_mirroring();
                         }
                         1 => {
                             mmc1.chr_banks.0 = mmc1.shift_reg & 0x1F;
-                            
                         }
                         2 => {
                             mmc1.chr_banks.1 = mmc1.shift_reg & 0x1F;
-                            
                         }
                         3 => {
                             mmc1.prg_bank = mmc1.shift_reg & 0x0F;
-                            
                         }
                         _ => {}
                     }
@@ -364,14 +366,18 @@ impl Mapper {
                         if chr_mode == 0 {
                             // 8KB mode
                             let val = mmc1.cart.chr_ram[addr as usize];
-                            
+
                             return val;
                         } else {
                             // 4KB mode
-                            let bank = if addr < 0x1000 { mmc1.chr_banks.0 } else { mmc1.chr_banks.1 };
+                            let bank = if addr < 0x1000 {
+                                mmc1.chr_banks.0
+                            } else {
+                                mmc1.chr_banks.1
+                            };
                             let offset = (bank as usize * 0x1000) + (addr as usize & 0x0FFF);
                             let val = mmc1.cart.chr_ram[offset];
-                            
+
                             return val;
                         }
                     } else {
@@ -384,7 +390,11 @@ impl Mapper {
                             return mmc1.cart.chr_rom[offset];
                         } else {
                             // 4KB mode
-                            let bank = if addr < 0x1000 { mmc1.chr_banks.0 } else { mmc1.chr_banks.1 };
+                            let bank = if addr < 0x1000 {
+                                mmc1.chr_banks.0
+                            } else {
+                                mmc1.chr_banks.1
+                            };
                             let offset = (bank as usize * 0x1000) + (addr as usize & 0x0FFF);
                             return mmc1.cart.chr_rom[offset];
                         }
@@ -411,13 +421,16 @@ impl Mapper {
                     // CHR RAM mode
                     let chr_mode = (mmc1.control >> 4) & 1;
                     if chr_mode == 0 {
-                        
                         mmc1.cart.chr_ram[addr as usize] = val;
                     } else {
                         // 4KB mode
-                        let bank = if addr < 0x1000 { mmc1.chr_banks.0 } else { mmc1.chr_banks.1 };
+                        let bank = if addr < 0x1000 {
+                            mmc1.chr_banks.0
+                        } else {
+                            mmc1.chr_banks.1
+                        };
                         let offset = (bank as usize * 0x1000) + (addr as usize & 0x0FFF);
-                        
+
                         mmc1.cart.chr_ram[offset] = val;
                     }
                 }
